@@ -3,6 +3,7 @@
 #include <TouchScreen.h>
 #include <SPI.h>
 #include "rtttl_parser.h"
+#include <Fonts/FreeMonoBold9pt7b.h>
 
 // === TFT Display Pins ===
 #define TFT_CS 10
@@ -34,6 +35,9 @@ TouchScreen ts = TouchScreen(XP, YP, XM, YM, 300);
 #define LED_RED   5
 #define LED_GREEN 6
 #define LED_BLUE  7
+
+// === COLORS ===
+uint16_t pastelPink = tft.color565(255, 182, 193);
 
 // === FSM States ===
 #define HOME_SCREEN 0
@@ -91,7 +95,7 @@ void timerTick();
 void setup() {
   Serial.begin(9600);
   tft.begin();
-  tft.setRotation(1);
+  tft.setRotation(0);
   pinMode(START_BUTTON_PIN, INPUT_PULLUP);
   pinMode(RESET_BUTTON_PIN, INPUT_PULLUP);
   pinMode(LED_RED, OUTPUT);
@@ -113,22 +117,25 @@ void loop() {
 
 // === HOME SCREEN ===
 void drawHomeScreen() {
-  tft.fillScreen(ILI9341_BLACK);
+  tft.fillScreen(pastelPink);
   setLEDColor(255, 255, 255);
   running = false;
   isPaused = false;
   completedSessions = 0;
 
   tft.setTextColor(ILI9341_WHITE);
-  tft.setTextSize(3);
+  tft.setTextSize(2);
   tft.setCursor(40, 60);
-  tft.print("Pomodoro Timer");
+  //tft.setFont(& FreeMonoBold9pt7b);
+  drawCenteredText(tft, "Pomodoro Timer", 60);
+  //tft.print("Pomodoro Timer");
 
   // Big green Start button
-  tft.fillRect(100, 140, 120, 60, ILI9341_GREEN);
+  tft.fillRect(60, 210, 120, 60, ILI9341_GREEN);
+
   tft.setTextColor(ILI9341_BLACK);
   tft.setTextSize(3);
-  tft.setCursor(125, 160);
+  tft.setCursor(75, 230);
   tft.print("START");
 }
 
@@ -257,7 +264,7 @@ void timerTick() {
 void handleButtons() {
   if (millis() - lastButtonPress < debounceDelay) return;
 
-  if (digitalRead(START_BUTTON_PIN) == LOW) {
+  if (digitalRead(START_BUTTON_PIN) == LOW || ) {
     if (currentState == HOME_SCREEN) {
       changeState(FOCUS_ACTIVE);
     } 
@@ -309,28 +316,47 @@ void handleTouch() {
 
   if (p.z < MINPRESSURE || p.z > MAXPRESSURE) return;
 
-  int temp = p.x;
-  p.x = map(p.y, TS_MINY, TS_MAXY, 0, tft.width());
-  p.y = map(temp, TS_MINX, TS_MAXX, tft.height(), 0);
+  //int temp = p.x;
+  // p.x = map(p.y, TS_MINY, TS_MAXY, 0, tft.width());
+  // p.y = map(temp, TS_MINX, TS_MAXX, tft.height(), 0);
+  int px = touchToPixelX(p.x);
+  int py = touchToPixelY(p.y);
 
   if (currentState == HOME_SCREEN) {
-    if (p.x > 100 && p.x < 220 && p.y > 140 && p.y < 200) {
+    if (px > 55 && px < 185 && py > 205 && py < 275) {
       Serial.println("Touch Start (Home)");
       changeState(FOCUS_ACTIVE);
     }
   } 
-  else if (p.y > 150 && p.y < 190) {
-    if (p.x > 40 && p.x < 120) { // START/PAUSE
+  else if (py > 245 && py < 295) {
+    if (px > 15 && px < 115) { // START/PAUSE
+
       handleButtons();
-    } else if (p.x > 240 && p.x < 320) { // RESET
+    } else if (px > 125 && px < 215) { // RESET
       changeState(HOME_SCREEN);
     }
   }
+  Serial.println(p.y);
 }
 
 // === UI HELPERS ===
+void drawCenteredText(Adafruit_ILI9341 &tft, const char *text, int y) {
+  int16_t x1, y1;
+  uint16_t w, h;
+
+  // Compute the bounding box of the text using current text size & font
+  tft.getTextBounds(text, 0, y, &x1, &y1, &w, &h);
+
+  // center X = (screen_width - text_width) / 2
+  int x = (tft.width() - w) / 2;
+
+  // Draw the centered text
+  tft.setCursor(x, y);
+  tft.print(text);
+}
+
 void drawUI() {
-  tft.fillScreen(ILI9341_BLACK);
+  tft.fillScreen(pastelPink);
   tft.setTextColor(ILI9341_WHITE);
   tft.setTextSize(2);
   tft.setCursor(50, 10);
@@ -340,15 +366,15 @@ void drawUI() {
 }
 
 void drawButtons() {
-  tft.fillRect(40, 150, 80, 40, ILI9341_GREEN);
-  tft.fillRect(140, 150, 80, 40, ILI9341_YELLOW);
-  tft.fillRect(240, 150, 80, 40, ILI9341_RED);
+  //tft.fillRect(30, 250, 40, 30, ILI9341_GREEN); no need for start button
+  tft.fillRect(30, 250, 80, 50, ILI9341_YELLOW);
+  tft.fillRect(130, 250, 80, 50, ILI9341_RED);
 
   tft.setTextColor(ILI9341_BLACK);
   tft.setTextSize(2);
-  tft.setCursor(55, 160); tft.print("START");
-  tft.setCursor(160, 160); tft.print("PAUSE");
-  tft.setCursor(260, 160); tft.print("RESET");
+  //tft.setCursor(50, 160); tft.print("START");
+  tft.setCursor(40, 270); tft.print("PAUSE");
+  tft.setCursor(140, 270); tft.print("RESET");
 }
 
 void updateTimerDisplay() {
@@ -391,5 +417,15 @@ void playRTTTL(const String &song) {
   noTone(BUZZER_PIN);
 }
 
+// Convert pixel coordinate to raw touchscreen coordinate
+int touchToPixelX(int tx) {
+  // touch X: 200 → 845  maps to pixel X: 0 → 240
+  return map(tx, 200, 845, 0, 240);
+}
+
+int touchToPixelY(int ty) {
+  // touch Y: 145 → 890  maps to pixel Y: 0 → 320
+  return map(ty, 145, 890, 0, 320);
+}
 
 
