@@ -3,6 +3,8 @@
 #include <TouchScreen.h>
 #include <SPI.h>
 #include "rtttl_parser.h"
+#include <WiFiS3.h>
+#include "arduino_secrets.h"
 #include <Fonts/FreeMonoBold9pt7b.h>
 
 // === TFT Display Pins ===
@@ -67,6 +69,13 @@ unsigned long lastUpdate = 0;
 unsigned long lastButtonPress = 0;
 const unsigned long debounceDelay = 200;
 
+// Wi-fi
+char ssid[] = SECRET_SSID;
+char pass[] = SECRET_PASS;
+int status = WL_IDLE_STATUS; 
+WiFiClient client;
+unsigned long lastWifiSend = 0;
+
 // Time scaling (0.01 = fast demo)
 float timeScale = 0.01;
 
@@ -96,6 +105,36 @@ void setup() {
   Serial.begin(9600);
   tft.begin();
   tft.setRotation(0);
+
+  // wi-fi setup taken from the ConnectWithWPA wifis3 examples ketch
+  // check for the WiFi module:
+  if (WiFi.status() == WL_NO_MODULE) {
+    Serial.println("Communication with WiFi module failed!");
+    // don't continue
+    while (true);
+  }
+
+  String fv = WiFi.firmwareVersion();
+  if (fv < WIFI_FIRMWARE_LATEST_VERSION) {
+    Serial.println("Please upgrade the firmware");
+  }
+
+  // attempt to connect to WiFi network:
+  while (status != WL_CONNECTED) {
+    Serial.print("Attempting to connect to WPA SSID: ");
+    Serial.println(ssid);
+    // Connect to WPA/WPA2 network:
+    status = WiFi.begin(ssid, pass);
+
+    // wait 10 seconds for connection:
+    delay(10000);
+  }
+
+  // you're connected now, so print out the data:
+  Serial.print("You're connected to the network");
+  printCurrentNet();
+  printWifiData();
+  
   pinMode(START_BUTTON_PIN, INPUT_PULLUP);
   pinMode(RESET_BUTTON_PIN, INPUT_PULLUP);
   pinMode(LED_RED, OUTPUT);
@@ -258,6 +297,12 @@ void timerTick() {
     }
   }
   updateTimerDisplay();
+
+  // send pomodoro status ever 5 seconds
+  if (millis() - lastWifiSend > 5000) {
+    sendPomodoroStatus();
+    lastWifiSend = millis();
+  }
 }
 
 // === BUTTON HANDLER ===
@@ -428,4 +473,89 @@ int touchToPixelY(int ty) {
   return map(ty, 145, 890, 0, 320);
 }
 
+// === SERVER COMMUNICATION ===
+void sendPomodoroStatus() {
+  const char* serverIP = "192.168.1.236";  
+  int serverPort = 3000;
 
+  Serial.println("Connecting to server...");
+
+  if (client.connect(serverIP, serverPort)) {
+    Serial.println("Connected to server!");
+
+    // Build JSON manually
+    String json = "{";
+    json += "\"state\":" + String(currentState) + ",";
+    json += "\"minutes\":" + String(minutes) + ",";
+    json += "\"seconds\":" + String(seconds) + ",";
+    json += "\"completed\":" + String(completedSessions);
+    json += "}";
+
+    // Send POST request
+    client.println("POST /update HTTP/1.1");
+    client.print("Host: ");
+    client.println(serverIP);
+    client.println("Content-Type: application/json");
+    client.print("Content-Length: ");
+    client.println(json.length());
+    client.println();
+    client.print(json);
+
+    delay(10);
+    client.stop();
+  } 
+  else {
+    Serial.println("Connection to server FAILED");
+  }
+}
+
+// === Wi-Fi Helpers ===
+void printWifiData() {
+  // print your board's IP address:
+  IPAddress ip = WiFi.localIP();
+  Serial.print("IP Address: ");
+  
+  Serial.println(ip);
+
+  // print your MAC address:
+  byte mac[6];
+  WiFi.macAddress(mac);
+  Serial.print("MAC address: ");
+  printMacAddress(mac);
+}
+
+void printCurrentNet() {
+  // print the SSID of the network you're attached to:
+  Serial.print("SSID: ");
+  Serial.println(WiFi.SSID());
+
+  // print the MAC address of the router you're attached to:
+  byte bssid[6];
+  WiFi.BSSID(bssid);
+  Serial.print("BSSID: ");
+  printMacAddress(bssid);
+
+  // print the received signal strength:
+  long rssi = WiFi.RSSI();
+  Serial.print("signal strength (RSSI):");
+  Serial.println(rssi);
+
+  // print the encryption type:
+  byte encryption = WiFi.encryptionType();
+  Serial.print("Encryption Type:");
+  Serial.println(encryption, HEX);
+  Serial.println();
+}
+
+void printMacAddress(byte mac[]) {
+  for (int i = 0; i < 6; i++) {
+    if (i > 0) {
+      Serial.print(":");
+    }
+    if (mac[i] < 16) {
+      Serial.print("0");
+    }
+    Serial.print(mac[i], HEX);
+  }
+  Serial.println();
+}
