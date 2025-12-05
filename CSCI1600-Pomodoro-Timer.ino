@@ -39,7 +39,11 @@ TouchScreen ts = TouchScreen(XP, YP, XM, YM, 300);
 #define LED_BLUE  7
 
 // === COLORS ===
-uint16_t pastelPink = tft.color565(255, 182, 193);
+uint16_t bgColor      = tft.color565(125, 75, 85);    // warm wood-pink
+uint16_t boxOutline   = tft.color565(245, 235, 220);  // warm cream
+uint16_t btnStart     = tft.color565(94, 138, 96);    // forest sage green
+uint16_t btnPause     = tft.color565(204, 153, 80);   // amber gold
+uint16_t btnReset     = tft.color565(192, 94, 94);    // burnt coral
 
 // === FSM States ===
 #define HOME_SCREEN 0
@@ -61,6 +65,10 @@ int completedSessions = 0;
 bool running = false;
 bool isPaused = false;
 bool justResumed = false;
+
+//ISR variables
+volatile bool startButtonPressed = false;
+volatile bool resetButtonPressed = false;
 
 int minutes = 25;
 int seconds = 0;
@@ -97,9 +105,19 @@ void updateTimerDisplay();
 void updateDisplayText(const char* text);
 void setLEDColor(int r, int g, int b);
 void changeState(int newState);
-void handleButtons();
+void handleButtons(bool triggered = false);
 void handleTouch();
 void timerTick();
+
+// When Start button pressed
+void startButtonISR() {
+  startButtonPressed = true;
+}
+
+// When Reset button pressed
+void resetButtonISR() {
+  resetButtonPressed = true;
+}
 
 void setup() {
   Serial.begin(9600);
@@ -130,13 +148,17 @@ void setup() {
     delay(10000);
   }
 
-  // you're connected now, so print out the data:
+  //you're connected now, so print out the data:
   Serial.print("You're connected to the network");
   printCurrentNet();
   printWifiData();
   
   pinMode(START_BUTTON_PIN, INPUT_PULLUP);
   pinMode(RESET_BUTTON_PIN, INPUT_PULLUP);
+
+  attachInterrupt(digitalPinToInterrupt(START_BUTTON_PIN), startButtonISR, FALLING);
+  attachInterrupt(digitalPinToInterrupt(RESET_BUTTON_PIN), resetButtonISR, FALLING);
+
   pinMode(LED_RED, OUTPUT);
   pinMode(LED_GREEN, OUTPUT);
   pinMode(LED_BLUE, OUTPUT);
@@ -156,7 +178,7 @@ void loop() {
 
 // === HOME SCREEN ===
 void drawHomeScreen() {
-  tft.fillScreen(pastelPink);
+  tft.fillScreen(bgColor);
   setLEDColor(255, 255, 255);
   running = false;
   isPaused = false;
@@ -165,14 +187,12 @@ void drawHomeScreen() {
   tft.setTextColor(ILI9341_WHITE);
   tft.setTextSize(2);
   tft.setCursor(40, 60);
-  //tft.setFont(& FreeMonoBold9pt7b);
   drawCenteredText(tft, "Pomodoro Timer", 60);
-  //tft.print("Pomodoro Timer");
 
-  // Big green Start button
-  tft.fillRect(60, 210, 120, 60, ILI9341_GREEN);
+  //Start button
+  tft.fillRect(60, 210, 120, 60, btnStart);
 
-  tft.setTextColor(ILI9341_BLACK);
+  tft.setTextColor(ILI9341_WHITE);
   tft.setTextSize(3);
   tft.setCursor(75, 230);
   tft.print("START");
@@ -298,7 +318,7 @@ void timerTick() {
   }
   updateTimerDisplay();
 
-  // send pomodoro status ever 5 seconds
+  send pomodoro status ever 5 seconds
   if (millis() - lastWifiSend > 5000) {
     sendPomodoroStatus();
     lastWifiSend = millis();
@@ -306,10 +326,15 @@ void timerTick() {
 }
 
 // === BUTTON HANDLER ===
-void handleButtons() {
+void handleButtons(bool triggered) {
+  //triggered arg to handle touch screen presses for start and pause
+  //handle button debouncing:
   if (millis() - lastButtonPress < debounceDelay) return;
 
-  if (digitalRead(START_BUTTON_PIN) == LOW) {
+  //handle ISR flag OR touch trigger
+  if (startButtonPressed || triggered) {
+    startButtonPressed = false;  // Clear the flag
+    
     if (currentState == HOME_SCREEN) {
       changeState(FOCUS_ACTIVE);
     } 
@@ -341,7 +366,8 @@ void handleButtons() {
     lastButtonPress = millis();
   }
 
-  if (digitalRead(RESET_BUTTON_PIN) == LOW) {
+  if (resetButtonPressed) {
+    resetButtonPressed = false;  // Clear the flag
     completedSessions = 0;
     changeState(HOME_SCREEN);
     lastButtonPress = millis();
@@ -362,8 +388,6 @@ void handleTouch() {
   if (p.z < MINPRESSURE || p.z > MAXPRESSURE) return;
 
   //int temp = p.x;
-  // p.x = map(p.y, TS_MINY, TS_MAXY, 0, tft.width());
-  // p.y = map(temp, TS_MINX, TS_MAXX, tft.height(), 0);
   int px = touchToPixelX(p.x);
   int py = touchToPixelY(p.y);
 
@@ -375,8 +399,7 @@ void handleTouch() {
   } 
   else if (py > 245 && py < 295) {
     if (px > 15 && px < 115) { // START/PAUSE
-
-      handleButtons();
+      handleButtons(true);
     } else if (px > 125 && px < 215) { // RESET
       changeState(HOME_SCREEN);
     }
@@ -401,23 +424,21 @@ void drawCenteredText(Adafruit_ILI9341 &tft, const char *text, int y) {
 }
 
 void drawUI() {
-  tft.fillScreen(pastelPink);
+  tft.fillScreen(bgColor);
   tft.setTextColor(ILI9341_WHITE);
   tft.setTextSize(2);
-  tft.setCursor(50, 10);
+  tft.setCursor(40, 80);
   tft.print("Pomodoro Timer");
-  tft.drawRect(80, 50, 160, 50, ILI9341_WHITE);
+  tft.drawRect(30, 120, 180, 50, ILI9341_WHITE);
   updateTimerDisplay();
 }
 
 void drawButtons() {
-  //tft.fillRect(30, 250, 40, 30, ILI9341_GREEN); no need for start button
-  tft.fillRect(30, 250, 80, 50, ILI9341_YELLOW);
-  tft.fillRect(130, 250, 80, 50, ILI9341_RED);
+  tft.fillRect(30, 250, 80, 50, btnPause);
+  tft.fillRect(130, 250, 80, 50, btnReset);
 
-  tft.setTextColor(ILI9341_BLACK);
+  tft.setTextColor(ILI9341_WHITE);
   tft.setTextSize(2);
-  //tft.setCursor(50, 160); tft.print("START");
   tft.setCursor(40, 270); tft.print("PAUSE");
   tft.setCursor(140, 270); tft.print("RESET");
 }
@@ -425,19 +446,19 @@ void drawButtons() {
 void updateTimerDisplay() {
   char timeStr[6];
   sprintf(timeStr, "%02d:%02d", minutes, seconds);
-  tft.fillRect(81, 51, 158, 48, ILI9341_BLACK);
-  tft.setCursor(120, 65);
-  tft.setTextColor(ILI9341_WHITE);
+  tft.fillRect(31, 121, 178, 48, bgColor);
+  tft.setCursor(77, 135);
+  tft.setTextColor(boxOutline);
   tft.setTextSize(3);
   tft.print(timeStr);
 }
 
 void updateDisplayText(const char* text) {
-  tft.fillRect(40, 110, 240, 20, ILI9341_BLACK);
+  tft.fillRect(30, 180, 180, 50, bgColor);
   tft.setTextColor(ILI9341_WHITE);
   tft.setTextSize(2);
-  tft.setCursor(60, 110);
-  tft.print(text);
+  tft.setCursor(42, 190);
+  drawCenteredText(tft, text, 190);
 }
 
 void setLEDColor(int r, int g, int b) {
