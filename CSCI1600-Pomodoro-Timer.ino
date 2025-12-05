@@ -97,6 +97,8 @@ int seconds = 0;
 unsigned long lastUpdate = 0;
 unsigned long lastButtonPress = 0;
 const unsigned long debounceDelay = 200;
+unsigned long remainingAtPause = 0;
+
 
 // === Function Definitions ===
 
@@ -260,16 +262,28 @@ void handleButtons() {
 
         // -------- Pause / Resume (any phase) --------
         if (!isPaused) {
-            // Go to paused state
             isPaused = true;
             running = false;
-            changeVisual(currentPhase, true);  // paused UI
-        } 
+
+            // Save remaining time at pause moment
+            unsigned long rawElapsed = millis() - phaseStartTime;
+            remainingAtPause = phaseDuration - rawElapsed;
+
+            changeVisual(currentPhase, true);
+        }
         else {
-            // Resume
+            // --- RESUME PRESSED ---
             isPaused = false;
             running = true;
-            changeVisual(currentPhase, false); // resumed UI
+
+            // Reset the phaseStartTime so countdown restarts from remainingAtPause
+            phaseDuration = remainingAtPause;
+            phaseStartTime = millis();
+
+            expectedEndTime = phaseStartTime + phaseDuration;
+            watchdogArmed = true;
+
+            changeVisual(currentPhase, false);
         }
 
         lastButtonPress = millis();
@@ -480,7 +494,9 @@ void changeVisual(Phase phase, bool paused) {
 
 
         // restore TCP if it was open before the redraw
-        if (wasConnected) ensureConnected();
+        if (wasConnected){
+            ensureConnected();
+        }
         return;
     }
 
