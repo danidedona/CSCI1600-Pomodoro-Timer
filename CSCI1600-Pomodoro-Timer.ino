@@ -309,7 +309,7 @@ void timerTick() {
 void handleButtons() {
   if (millis() - lastButtonPress < debounceDelay) return;
 
-  if (digitalRead(START_BUTTON_PIN) == LOW || ) {
+  if (digitalRead(START_BUTTON_PIN) == LOW) {
     if (currentState == HOME_SCREEN) {
       changeState(FOCUS_ACTIVE);
     } 
