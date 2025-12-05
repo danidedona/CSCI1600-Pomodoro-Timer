@@ -318,7 +318,7 @@ void timerTick() {
   }
   updateTimerDisplay();
 
-  send pomodoro status ever 5 seconds
+  //send pomodoro status ever 5 seconds
   if (millis() - lastWifiSend > 5000) {
     sendPomodoroStatus();
     lastWifiSend = millis();
