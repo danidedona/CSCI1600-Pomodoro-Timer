@@ -245,9 +245,7 @@ void handleButtons() {
     // Debounce
     if (millis() - lastButtonPress < debounceDelay) return;
 
-    // =========================
     // START / PAUSE BUTTON
-    // =========================
     if (startEvent) {
 
         // -------- Start from Home Screen --------
@@ -289,9 +287,7 @@ void handleButtons() {
         lastButtonPress = millis();
     }
 
-    // =========================
     // RESET BUTTON
-    // =========================
     if (resetEvent) {
 
         completedPomodoroSessions = 0;
@@ -325,9 +321,7 @@ void handleTouch() {
     int px = touchToPixelX(p.x);
     int py = touchToPixelY(p.y);
 
-    // =========================
     // HOME SCREEN → Start button
-    // =========================
     if (currentPhase == IDLE) {
         if (px > 55 && px < 185 && py > 205 && py < 275) {
             Serial.println("Touch Start (Home)");
@@ -339,9 +333,7 @@ void handleTouch() {
         }
     }
 
-    // =========================
     // UI BUTTON AREA
-    // =========================
     if (py > 245 && py < 295) {
 
         // PAUSE / RESUME by touch
@@ -483,9 +475,7 @@ void changeVisual(Phase phase, bool paused) {
         delay(5);          // brief settle time
     }
 
-    // -----------------------------
     // IDLE (Home Screen)
-    // -----------------------------
     if (phase == IDLE) {
         drawHomeScreen();
         setLEDColor(255, 255, 255);
@@ -503,9 +493,7 @@ void changeVisual(Phase phase, bool paused) {
     // Non-IDLE phases redraw UI frame
     drawActiveScreen();
 
-    // -----------------------------
     // Phase-specific UI
-    // -----------------------------
     switch (phase) {
 
         case FOCUS:
@@ -545,14 +533,12 @@ void changeVisual(Phase phase, bool paused) {
             break;
     }
 
-    // -----------------------------
     // Timer + Buttons (only non-IDLE)
-    // -----------------------------
     updateTimerDisplay();
     drawButtons();
 
     if (wasConnected) {
-        ensureConnected();    // safely restore persistent TCP connection
+        ensureConnected(); // safely restore persistent TCP connection
     }
 }
 //==============================================================================
@@ -578,7 +564,7 @@ void changePhase() {
         next = FOCUS;
     }
     else if (currentPhase == LONG_BREAK) {
-        completedPomodoroSessions = 0;  // reset cycle
+        completedPomodoroSessions = 0; // reset cycle
         next = FOCUS;
     }
 
@@ -635,7 +621,7 @@ void resetButtonISR() { resetButtonPressed = true; }
 // WATCHDOG
 //------------------------------------------------------------------------------
 void petWatchdog() {
-    watchdogArmed = false;   // disable until next phase
+    watchdogArmed = false; // disable until next phase
 }
 
 void checkWatchdog() {
