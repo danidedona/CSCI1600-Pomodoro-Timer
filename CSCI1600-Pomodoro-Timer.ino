@@ -136,6 +136,8 @@ void setup() {
   Serial.print("You're connected to the network");
   printCurrentNet();
   printWifiData();
+  // start up server connection
+  ensureConnected();
 
   pinMode(START_BUTTON_PIN, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(START_BUTTON_PIN), startButtonISR, FALLING);
@@ -461,6 +463,12 @@ void drawActiveScreen() {
 
 void changeVisual(Phase phase, bool paused) {
 
+      bool wasConnected = client.connected();
+    if (wasConnected) {
+        client.stop();     // close TCP so SPI doesn't corrupt WiFi chip
+        delay(5);          // brief settle time
+    }
+
     // -----------------------------
     // IDLE (Home Screen)
     // -----------------------------
@@ -469,7 +477,11 @@ void changeVisual(Phase phase, bool paused) {
         setLEDColor(255, 255, 255);
         running = false;
         isPaused = false;
-        return; 
+
+
+        // restore TCP if it was open before the redraw
+        if (wasConnected) ensureConnected();
+        return;
     }
 
     // Non-IDLE phases redraw UI frame
@@ -522,6 +534,10 @@ void changeVisual(Phase phase, bool paused) {
     // -----------------------------
     updateTimerDisplay();
     drawButtons();
+
+    if (wasConnected) {
+        ensureConnected();    // safely restore persistent TCP connection
+    }
 }
 //==============================================================================
 
@@ -533,6 +549,7 @@ void changeVisual(Phase phase, bool paused) {
 void changePhase() {
     // Determine next phase
     Phase next;
+    Phase prev = currentPhase;
 
     if (currentPhase == IDLE) {
         next = FOCUS;
@@ -547,6 +564,10 @@ void changePhase() {
     else if (currentPhase == LONG_BREAK) {
         completedPomodoroSessions = 0;  // reset cycle
         next = FOCUS;
+    }
+
+    if (prev == FOCUS && next != FOCUS) {
+        sendPomodoroStatus();
     }
 
     currentPhase = next;
@@ -627,16 +648,32 @@ void checkWatchdog() {
 //==============================================================================
 // WIFI / SERVER
 //------------------------------------------------------------------------------
+
+bool ensureConnected() {
+    // If still connected, all good
+    if (client.connected()) {
+        return true;
+    }
+
+    Serial.println("TCP disconnected — attempting reconnect...");
+
+    // Try reconnecting once
+    if (client.connect("192.168.1.236", 3000)) {
+        Serial.println("TCP reconnected.");
+        return true;
+    }
+
+    // If reconnect fails → restart entire system
+    Serial.println("TCP reconnect FAILED. REBOOTING SYSTEM.");
+    NVIC_SystemReset();     // full microcontroller reset
+    return false;           // never reached
+}
+
 void sendPomodoroStatus() {
-  const char* serverIP = "192.168.1.236";  
-  int serverPort = 3000;
+    // ensure connection is alive — may restart the system
+    if (!ensureConnected()) return;
 
-  Serial.println("Connecting to server...");
-
-  if (client.connect(serverIP, serverPort)) {
-    Serial.println("Connected to server!");
-
-    // Build JSON manually
+    // Build JSON
     String json = "{";
     json += "\"state\":" + String(currentPhase) + ",";
     json += "\"minutes\":" + String(minutes) + ",";
@@ -644,22 +681,16 @@ void sendPomodoroStatus() {
     json += "\"completed\":" + String(completedPomodoroSessions);
     json += "}";
 
-    // Send POST request
+    // Send POST without closing connection
     client.println("POST /update HTTP/1.1");
-    client.print("Host: ");
-    client.println(serverIP);
+    client.println("Host: 192.168.1.236");
     client.println("Content-Type: application/json");
     client.print("Content-Length: ");
     client.println(json.length());
     client.println();
     client.print(json);
 
-    delay(10);
-    client.stop();
-  } 
-  else {
-    Serial.println("Connection to server FAILED");
-  }
+    // IMPORTANT: DO NOT call client.stop()
 }
 
 // === Wi-Fi Helpers ===
