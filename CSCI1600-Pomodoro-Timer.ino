@@ -21,7 +21,6 @@ Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC, TFT_RST);
 TouchScreen ts = TouchScreen(XP, YP, XM, YM, 300);
 
 // === Touch Calibration ===
-// TODO: fix TFT calibration
 #define MINPRESSURE 10
 #define MAXPRESSURE 1000
 #define TS_MINX 920
@@ -45,80 +44,65 @@ uint16_t btnStart     = tft.color565(94, 138, 96);    // forest sage green
 uint16_t btnPause     = tft.color565(204, 153, 80);   // amber gold
 uint16_t btnReset     = tft.color565(192, 94, 94);    // burnt coral
 
-// === FSM States ===
-#define HOME_SCREEN 0
-#define FOCUS_ACTIVE 1
-#define FOCUS_PAUSED 2
-#define SHORT_BREAK_ACTIVE 3
-#define SHORT_BREAK_PAUSED 4
-#define LONG_BREAK_ACTIVE 5
-#define LONG_BREAK_PAUSED 6
-#define TRANSITION 7
-
 // === Buzzer Pins ===
 #define BUZZER_PIN 4
 
-// === Global Variables ===
-int currentState = HOME_SCREEN;
-int prevState = HOME_SCREEN;
-int completedSessions = 0;
-bool running = false;
-bool isPaused = false;
-bool justResumed = false;
+// === Pomorodo Time Configurations ===
+uint32_t FOCUS_DURATION_MS = 25UL * 60UL * 1000UL; 
+uint32_t SHORT_BREAK_MS = 5UL  * 60UL * 1000UL;  
+uint32_t LONG_BREAK_MS = 15UL * 60UL * 1000UL;
 
-//ISR variables
-volatile bool startButtonPressed = false;
-volatile bool resetButtonPressed = false;
+enum Phase {
+    IDLE,
+    FOCUS,
+    SHORT_BREAK,
+    LONG_BREAK
+};
+uint8_t completedPomodoroSessions = 0; // counts completed FOCUS phases (0–3 then long break)
+Phase currentPhase = IDLE;
+uint32_t phaseStartTime = 0; // Timestamp when this phase started
+uint32_t phaseDuration = 0; // How long this phase should last
 
-int minutes = 25;
-int seconds = 0;
+// === Watchdog Configurations ===
+uint32_t WATCHDOG_PATIENCE_MS = 0; // allowed timing drift +/-5ms
+uint32_t expectedEndTime = 0;
+bool watchdogArmed = false;
 
-unsigned long lastUpdate = 0;
-unsigned long lastButtonPress = 0;
-const unsigned long debounceDelay = 200;
 
-// Wi-fi
+// === WIFI Variables ===
 char ssid[] = SECRET_SSID;
 char pass[] = SECRET_PASS;
 int status = WL_IDLE_STATUS; 
 WiFiClient client;
 unsigned long lastWifiSend = 0;
 
-// Time scaling (0.01 = fast demo)
-float timeScale = 0.01;
-
-// Simple short tunes
-// TODO: make these actually sound good
+// === Buzzer Songs ===
 const String SONG_FOCUS_DONE  = "FocusDone:d=4,o=6,b=180:8g,8b,8d7,4g7";       
 const String SONG_BREAK_DONE  = "BreakDone:d=4,o=6,b=160:8c7,8a,8f,8d";          
 const String SONG_CYCLE_DONE  = "CycleDone:d=4,o=6,b=200:8c,8e,8g,8c7,8p,8g,8e"; 
-
 int noteFrequencies[100];
 int noteDurations[100];
 int songLen;
 
-// === Functions ===
-void drawHomeScreen();
-void drawUI();
-void drawButtons();
-void updateTimerDisplay();
-void updateDisplayText(const char* text);
-void setLEDColor(int r, int g, int b);
-void changeState(int newState);
-void handleButtons(bool triggered = false);
-void handleTouch();
-void timerTick();
+// === Interrupt Variables ===
+volatile bool startButtonPressed = false;
+volatile bool resetButtonPressed = false;
 
-// When Start button pressed
-void startButtonISR() {
-  startButtonPressed = true;
-}
+// === Misc. Variables ===
+bool fastTesting = true;
+bool running = false;
+bool isPaused = false;
+int minutes = 25;
+int seconds = 0;
+unsigned long lastUpdate = 0;
+unsigned long lastButtonPress = 0;
+const unsigned long debounceDelay = 200;
 
-// When Reset button pressed
-void resetButtonISR() {
-  resetButtonPressed = true;
-}
+// === Function Definitions ===
 
+//==============================================================================
+// SETUP AND LOOP
+//------------------------------------------------------------------------------
 void setup() {
   Serial.begin(9600);
   tft.begin();
@@ -148,15 +132,15 @@ void setup() {
     delay(10000);
   }
 
-  //you're connected now, so print out the data:
+  // you're connected now, so print out the data:
   Serial.print("You're connected to the network");
   printCurrentNet();
   printWifiData();
-  
-  pinMode(START_BUTTON_PIN, INPUT_PULLUP);
-  pinMode(RESET_BUTTON_PIN, INPUT_PULLUP);
 
+  pinMode(START_BUTTON_PIN, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(START_BUTTON_PIN), startButtonISR, FALLING);
+
+  pinMode(RESET_BUTTON_PIN, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(RESET_BUTTON_PIN), resetButtonISR, FALLING);
 
   pinMode(LED_RED, OUTPUT);
@@ -167,247 +151,235 @@ void setup() {
 }
 
 void loop() {
+  if (startButtonPressed) {
+        Serial.println("ISR: Start button interrupt fired!");
+    }
+    if (resetButtonPressed) {
+        Serial.println("ISR: Reset button interrupt fired!");
+    }
+
   handleButtons();
   handleTouch();
 
+  checkWatchdog();    
+
   if (running && millis() - lastUpdate >= 1000) {
     lastUpdate = millis();
-    timerTick();
+    timerLogic();
   }
 }
+//==============================================================================
 
-// === HOME SCREEN ===
-void drawHomeScreen() {
-  tft.fillScreen(bgColor);
-  setLEDColor(255, 255, 255);
-  running = false;
-  isPaused = false;
-  completedSessions = 0;
 
-  tft.setTextColor(ILI9341_WHITE);
-  tft.setTextSize(2);
-  tft.setCursor(40, 60);
-  drawCenteredText(tft, "Pomodoro Timer", 60);
+//==============================================================================
+// TIMER
+//------------------------------------------------------------------------------
+void timerLogic() {
+    if (!running || isPaused) return;
 
-  //Start button
-  tft.fillRect(60, 210, 120, 60, btnStart);
+    unsigned long rawElapsed = millis() - phaseStartTime;
 
-  tft.setTextColor(ILI9341_WHITE);
-  tft.setTextSize(3);
-  tft.setCursor(75, 230);
-  tft.print("START");
+    // Remaining ms
+    long remaining = (long)phaseDuration - (long)rawElapsed;
+
+    if (remaining <= 0) {
+        minutes = 0;
+        seconds = 0;
+        updateTimerDisplay();
+
+        running = false;
+
+        Serial.print("Session done: ");
+        Serial.println(currentPhase);
+
+        // Play buzzer tones
+        if (currentPhase == FOCUS) playRTTTL(SONG_FOCUS_DONE);
+        else if (currentPhase == SHORT_BREAK) playRTTTL(SONG_BREAK_DONE);
+        else if (currentPhase == LONG_BREAK) playRTTTL(SONG_CYCLE_DONE);
+
+        petWatchdog(); // mark phase as successfully completed
+
+        changePhase(); // start next session
+        return;
+    }
+
+    // Convert remaining ms → mm:ss
+    minutes = remaining / 60000;
+    seconds = (remaining % 60000) / 1000;
+
+    updateTimerDisplay();
+
+    // Wifi update every 5 seconds
+    if (millis() - lastWifiSend > 5000) {
+        sendPomodoroStatus();
+        lastWifiSend = millis();
+    }
 }
+//==============================================================================
 
-// === STATE HANDLER ===
-void changeState(int newState) {
-  prevState = currentState;
-  currentState = newState;
 
-  switch (newState) {
-    case HOME_SCREEN:
-      drawHomeScreen();
-      return;
+//==============================================================================
+// BUTTONS
+//------------------------------------------------------------------------------
+void handleButtons() {
 
-    case FOCUS_ACTIVE:
-      drawUI();
-      updateDisplayText("Focus Session");
-      setLEDColor(255, 0, 0);
-      running = true;
-      isPaused = false;
-      if (!justResumed) {
-        int scaledFocus = int(25 * 60 * timeScale);
-        minutes = scaledFocus / 60;
-        seconds = scaledFocus % 60;
-      }
-      justResumed = false;
-      lastUpdate = millis();
-      break;
+    // Copy & clear ISR flags atomically
+    bool startEvent = false;
+    bool resetEvent = false;
 
-    case FOCUS_PAUSED:
-      updateDisplayText("Paused - Focus");
-      setLEDColor(255, 255, 255);
-      running = false;
-      isPaused = true;
-      break;
+    noInterrupts();
+    if (startButtonPressed) {
+        startEvent = true;
+        startButtonPressed = false;
+    }
+    if (resetButtonPressed) {
+        resetEvent = true;
+        resetButtonPressed = false;
+    }
+    interrupts();
 
-    case SHORT_BREAK_ACTIVE:
-      drawUI();
-      updateDisplayText("Short Break");
-      setLEDColor(0, 255, 0);
-      running = true;
-      isPaused = false;
-      if (!justResumed) {
-        int scaledShort = int(5 * 60 * timeScale);
-        minutes = scaledShort / 60;
-        seconds = scaledShort % 60;
-      }
-      justResumed = false;
-      lastUpdate = millis();
-      break;
+    // Debounce
+    if (millis() - lastButtonPress < debounceDelay) return;
 
-    case SHORT_BREAK_PAUSED:
-      updateDisplayText("Paused - Break");
-      setLEDColor(255, 255, 255);
-      running = false;
-      isPaused = true;
-      break;
+    // =========================
+    // START / PAUSE BUTTON
+    // =========================
+    if (startEvent) {
 
-    case LONG_BREAK_ACTIVE:
-      drawUI();
-      updateDisplayText("Long Break");
-      setLEDColor(0, 0, 255);
-      running = true;
-      isPaused = false;
-      if (!justResumed) {
-        int scaledLong = int(15 * 60 * timeScale);
-        minutes = scaledLong / 60;
-        seconds = scaledLong % 60;
-      }
-      justResumed = false;
-      lastUpdate = millis();
-      break;
-
-    case LONG_BREAK_PAUSED:
-      updateDisplayText("Paused - Long Break");
-      setLEDColor(255, 255, 255);
-      running = false;
-      isPaused = true;
-      break;
-  }
-
-  updateTimerDisplay();
-  drawButtons();
-}
-
-// === TIMER LOGIC ===
-void timerTick() {
-  if (!running) return;
-
-  if (--seconds < 0) {
-    seconds = 59;
-    if (--minutes < 0) {
-      minutes = 0;
-      seconds = 0;
-      running = false;
-
-      Serial.print("Session done: ");
-      Serial.println(currentState);
-
-      // Buzzer feedback 
-      if (currentState == FOCUS_ACTIVE) {
-        completedSessions++;
-        playRTTTL(SONG_FOCUS_DONE);
-        // At end of focus:
-        if (completedSessions < 4)
-          changeState(SHORT_BREAK_ACTIVE);
-        else {
-          changeState(LONG_BREAK_ACTIVE);
-          completedSessions = 0;
+        // -------- Start from Home Screen --------
+        if (currentPhase == IDLE) {
+            completedPomodoroSessions = 0;
+            isPaused = false;
+            running = true;
+            changePhase();  // enters FOCUS phase and updates UI
+            lastButtonPress = millis();
+            return;
         }
-      }
-      else if (currentState == SHORT_BREAK_ACTIVE) {
-        playRTTTL(SONG_BREAK_DONE); 
-        changeState(FOCUS_ACTIVE);
-      }
-      else if (currentState == LONG_BREAK_ACTIVE) {
-        playRTTTL(SONG_CYCLE_DONE); 
-        changeState(FOCUS_ACTIVE);
-      }
-      return;
-    }
-  }
-  updateTimerDisplay();
 
-  //send pomodoro status ever 5 seconds
-  if (millis() - lastWifiSend > 5000) {
-    sendPomodoroStatus();
-    lastWifiSend = millis();
-  }
-}
+        // -------- Pause / Resume (any phase) --------
+        if (!isPaused) {
+            // Go to paused state
+            isPaused = true;
+            running = false;
+            changeVisual(currentPhase, true);  // paused UI
+        } 
+        else {
+            // Resume
+            isPaused = false;
+            running = true;
+            changeVisual(currentPhase, false); // resumed UI
+        }
 
-// === BUTTON HANDLER ===
-void handleButtons(bool triggered) {
-  //triggered arg to handle touch screen presses for start and pause
-  //handle button debouncing:
-  if (millis() - lastButtonPress < debounceDelay) return;
-
-  //handle ISR flag OR touch trigger
-  if (startButtonPressed || triggered) {
-    startButtonPressed = false;  // Clear the flag
-    
-    if (currentState == HOME_SCREEN) {
-      changeState(FOCUS_ACTIVE);
-    } 
-    else if (currentState == FOCUS_ACTIVE) {
-      justResumed = false;
-      changeState(FOCUS_PAUSED);
-    } 
-    else if (currentState == FOCUS_PAUSED) {
-      justResumed = true;
-      changeState(FOCUS_ACTIVE);
-    } 
-    else if (currentState == SHORT_BREAK_ACTIVE) {
-      justResumed = false;
-      changeState(SHORT_BREAK_PAUSED);
-    } 
-    else if (currentState == SHORT_BREAK_PAUSED) {
-      justResumed = true;
-      changeState(SHORT_BREAK_ACTIVE);
-    } 
-    else if (currentState == LONG_BREAK_ACTIVE) {
-      justResumed = false;
-      changeState(LONG_BREAK_PAUSED);
-    } 
-    else if (currentState == LONG_BREAK_PAUSED) {
-      justResumed = true;
-      changeState(LONG_BREAK_ACTIVE);
+        lastButtonPress = millis();
     }
 
-    lastButtonPress = millis();
-  }
+    // =========================
+    // RESET BUTTON
+    // =========================
+    if (resetEvent) {
 
-  if (resetButtonPressed) {
-    resetButtonPressed = false;  // Clear the flag
-    completedSessions = 0;
-    changeState(HOME_SCREEN);
-    lastButtonPress = millis();
-  }
+        completedPomodoroSessions = 0;
+        currentPhase = IDLE;
+        isPaused = false;
+        running = false;
+
+        changeVisual(IDLE, false);   // return to home screen UI
+
+        lastButtonPress = millis();
+    }
 }
+//==============================================================================
 
-// === TOUCH HANDLER ===
-// TODO: just generally fix this
+
+//==============================================================================
+// TOUCHSCREEN
+//------------------------------------------------------------------------------
 void handleTouch() {
-  pinMode(YP, INPUT);
-  pinMode(XM, INPUT);
-  TSPoint p = ts.getPoint();
-  pinMode(XM, OUTPUT);
-  pinMode(YP, OUTPUT);
-  digitalWrite(XM, LOW);
-  digitalWrite(YP, HIGH);
 
-  if (p.z < MINPRESSURE || p.z > MAXPRESSURE) return;
+    pinMode(YP, INPUT);
+    pinMode(XM, INPUT);
+    TSPoint p = ts.getPoint();
+    pinMode(XM, OUTPUT);
+    pinMode(YP, OUTPUT);
+    digitalWrite(XM, LOW);
+    digitalWrite(YP, HIGH);
 
-  //int temp = p.x;
-  int px = touchToPixelX(p.x);
-  int py = touchToPixelY(p.y);
+    if (p.z < MINPRESSURE || p.z > MAXPRESSURE) return;
 
-  if (currentState == HOME_SCREEN) {
-    if (px > 55 && px < 185 && py > 205 && py < 275) {
-      Serial.println("Touch Start (Home)");
-      changeState(FOCUS_ACTIVE);
+    int px = touchToPixelX(p.x);
+    int py = touchToPixelY(p.y);
+
+    // =========================
+    // HOME SCREEN → Start button
+    // =========================
+    if (currentPhase == IDLE) {
+        if (px > 55 && px < 185 && py > 205 && py < 275) {
+            Serial.println("Touch Start (Home)");
+            completedPomodoroSessions = 0;
+            isPaused = false;
+            running = true;
+            changePhase();       // enters FOCUS
+            return;
+        }
     }
-  } 
-  else if (py > 245 && py < 295) {
-    if (px > 15 && px < 115) { // START/PAUSE
-      handleButtons(true);
-    } else if (px > 125 && px < 215) { // RESET
-      changeState(HOME_SCREEN);
-    }
-  }
-  Serial.println(p.y);
+
+    // =========================
+    // UI BUTTON AREA
+    // =========================
+    if (py > 245 && py < 295) {
+
+        // PAUSE / RESUME by touch
+        if (px > 15 && px < 115) {
+            noInterrupts();
+            startButtonPressed = true;
+            interrupts();
+        }
+
+        // RESET by touch
+       else if (px > 125 && px < 215) {
+            noInterrupts();
+            resetButtonPressed = true;
+            interrupts();
+        }
+            }
+
 }
 
-// === UI HELPERS ===
+// Convert pixel coordinate to raw touchscreen coordinate
+int touchToPixelX(int tx) {
+  // touch X: 200 → 845  maps to pixel X: 0 → 240
+  return map(tx, 200, 845, 0, 240);
+}
+
+int touchToPixelY(int ty) {
+  // touch Y: 145 → 890  maps to pixel Y: 0 → 320
+  return map(ty, 145, 890, 0, 320);
+}
+//==============================================================================
+
+//==============================================================================
+// BUZZER
+//------------------------------------------------------------------------------
+void playRTTTL(const String &song) {
+  songLen = rtttlToBuffers(song, noteFrequencies, noteDurations);
+  if (songLen == -1) {
+    Serial.println("Error parsing song!");
+    return;
+  }
+
+  for (int i = 0; i < songLen; i++) {
+    int freq = noteFrequencies[i];
+    int dur = noteDurations[i];
+    if (freq > 0) tone(BUZZER_PIN, freq, dur);
+    delay(dur * 1.3); // pause between notes
+  }
+  noTone(BUZZER_PIN);
+}
+//==============================================================================
+
+//==============================================================================
+// UI / OTHER VISUALS
+//------------------------------------------------------------------------------
 void drawCenteredText(Adafruit_ILI9341 &tft, const char *text, int y) {
   int16_t x1, y1;
   uint16_t w, h;
@@ -421,16 +393,6 @@ void drawCenteredText(Adafruit_ILI9341 &tft, const char *text, int y) {
   // Draw the centered text
   tft.setCursor(x, y);
   tft.print(text);
-}
-
-void drawUI() {
-  tft.fillScreen(bgColor);
-  tft.setTextColor(ILI9341_WHITE);
-  tft.setTextSize(2);
-  tft.setCursor(40, 80);
-  tft.print("Pomodoro Timer");
-  tft.drawRect(30, 120, 180, 50, ILI9341_WHITE);
-  updateTimerDisplay();
 }
 
 void drawButtons() {
@@ -467,34 +429,204 @@ void setLEDColor(int r, int g, int b) {
   analogWrite(LED_BLUE, b);
 }
 
-void playRTTTL(const String &song) {
-  songLen = rtttlToBuffers(song, noteFrequencies, noteDurations);
-  if (songLen == -1) {
-    Serial.println("Error parsing song!");
-    return;
-  }
+void drawHomeScreen() {
+  tft.fillScreen(bgColor);
+  setLEDColor(255, 255, 255);
+  running = false;
+  isPaused = false;
 
-  for (int i = 0; i < songLen; i++) {
-    int freq = noteFrequencies[i];
-    int dur = noteDurations[i];
-    if (freq > 0) tone(BUZZER_PIN, freq, dur);
-    delay(dur * 1.3); // pause between notes
-  }
-  noTone(BUZZER_PIN);
+  tft.setTextColor(ILI9341_WHITE);
+  tft.setTextSize(2);
+  tft.setCursor(40, 60);
+  drawCenteredText(tft, "Pomodoro Timer", 60);
+
+  //Start button
+  tft.fillRect(60, 210, 120, 60, btnStart);
+
+  tft.setTextColor(ILI9341_WHITE);
+  tft.setTextSize(3);
+  tft.setCursor(75, 230);
+  tft.print("START");
 }
 
-// Convert pixel coordinate to raw touchscreen coordinate
-int touchToPixelX(int tx) {
-  // touch X: 200 → 845  maps to pixel X: 0 → 240
-  return map(tx, 200, 845, 0, 240);
+void drawActiveScreen() {
+  tft.fillScreen(bgColor);
+  tft.setTextColor(ILI9341_WHITE);
+  tft.setTextSize(2);
+  tft.setCursor(40, 80);
+  tft.print("Pomodoro Timer");
+  tft.drawRect(30, 120, 180, 50, ILI9341_WHITE);
+  updateTimerDisplay();
 }
 
-int touchToPixelY(int ty) {
-  // touch Y: 145 → 890  maps to pixel Y: 0 → 320
-  return map(ty, 145, 890, 0, 320);
+void changeVisual(Phase phase, bool paused) {
+
+    // -----------------------------
+    // IDLE (Home Screen)
+    // -----------------------------
+    if (phase == IDLE) {
+        drawHomeScreen();
+        setLEDColor(255, 255, 255);
+        running = false;
+        isPaused = false;
+        return; 
+    }
+
+    // Non-IDLE phases redraw UI frame
+    drawActiveScreen();
+
+    // -----------------------------
+    // Phase-specific UI
+    // -----------------------------
+    switch (phase) {
+
+        case FOCUS:
+            if (paused) {
+                updateDisplayText("Paused - Focus");
+                setLEDColor(255, 255, 255);
+                running = false;
+            } else {
+                updateDisplayText("Focus Session");
+                setLEDColor(255, 0, 0);
+                running = true;
+            }
+            break;
+
+        case SHORT_BREAK:
+            if (paused) {
+                updateDisplayText("Paused - Short Break");
+                setLEDColor(255, 255, 255);
+                running = false;
+            } else {
+                updateDisplayText("Short Break");
+                setLEDColor(0, 255, 0);
+                running = true;
+            }
+            break;
+
+        case LONG_BREAK:
+            if (paused) {
+                updateDisplayText("Paused - Long Break");
+                setLEDColor(255, 255, 255);
+                running = false;
+            } else {
+                updateDisplayText("Long Break");
+                setLEDColor(0, 0, 255);
+                running = true;
+            }
+            break;
+    }
+
+    // -----------------------------
+    // Timer + Buttons (only non-IDLE)
+    // -----------------------------
+    updateTimerDisplay();
+    drawButtons();
+}
+//==============================================================================
+
+
+
+//==============================================================================
+// PHASE LOGIC
+//------------------------------------------------------------------------------
+void changePhase() {
+    // Determine next phase
+    Phase next;
+
+    if (currentPhase == IDLE) {
+        next = FOCUS;
+    }
+    else if (currentPhase == FOCUS) {
+        completedPomodoroSessions++;
+        next = (completedPomodoroSessions < 4) ? SHORT_BREAK : LONG_BREAK;
+    }
+    else if (currentPhase == SHORT_BREAK) {
+        next = FOCUS;
+    }
+    else if (currentPhase == LONG_BREAK) {
+        completedPomodoroSessions = 0;  // reset cycle
+        next = FOCUS;
+    }
+
+    currentPhase = next;
+
+    // Assign new phase duration
+    if (fastTesting) {
+        // FAST MODE: super short durations
+        switch (next) {
+            case FOCUS:       phaseDuration = 10 * 1000; break; // 10 seconds
+            case SHORT_BREAK: phaseDuration = 5  * 1000; break; // 5 seconds
+            case LONG_BREAK:  phaseDuration = 8  * 1000; break; // 8 seconds
+            case IDLE:        phaseDuration = 0;         break;
+        }
+    } else {
+        // NORMAL MODE
+        switch (next) {
+            case FOCUS:       phaseDuration = FOCUS_DURATION_MS; break;
+            case SHORT_BREAK: phaseDuration = SHORT_BREAK_MS;    break;
+            case LONG_BREAK:  phaseDuration = LONG_BREAK_MS;     break;
+            case IDLE:        phaseDuration = 0;                 break;
+        }
+    }
+
+    // Set phase timing
+    phaseStartTime = millis();
+
+    // ARM watchdog using new duration
+    expectedEndTime = phaseStartTime + phaseDuration;
+    watchdogArmed = true;
+
+    // Update display timer
+    minutes = (phaseDuration / 1000) / 60;
+    seconds = (phaseDuration / 1000) % 60;
+
+    // Update UI
+    changeVisual(next, false);
+}
+//==============================================================================
+
+//==============================================================================
+// ISR
+//------------------------------------------------------------------------------
+void startButtonISR() { startButtonPressed = true; }
+void resetButtonISR() { resetButtonPressed = true; }
+//==============================================================================
+
+
+//==============================================================================
+// WATCHDOG
+//------------------------------------------------------------------------------
+void petWatchdog() {
+    watchdogArmed = false;   // disable until next phase
 }
 
-// === SERVER COMMUNICATION ===
+void checkWatchdog() {
+    if (!watchdogArmed) return;
+    if (!running || isPaused) return;
+
+    unsigned long now = millis();
+
+    // If the timer should be finished, check accuracy
+    if (now >= expectedEndTime) {
+
+        long drift = (long)now - (long)expectedEndTime;
+
+        if (abs(drift) > WATCHDOG_PATIENCE_MS) {
+            Serial.println("WATCHDOG ERROR: Timing drift detected!");
+            Serial.print("Drift = "); Serial.println(drift);
+
+            NVIC_SystemReset(); // complete microcontroller restart
+        }
+        petWatchdog();
+    }
+}
+//==============================================================================
+
+
+//==============================================================================
+// WIFI / SERVER
+//------------------------------------------------------------------------------
 void sendPomodoroStatus() {
   const char* serverIP = "192.168.1.236";  
   int serverPort = 3000;
@@ -506,10 +638,10 @@ void sendPomodoroStatus() {
 
     // Build JSON manually
     String json = "{";
-    json += "\"state\":" + String(currentState) + ",";
+    json += "\"state\":" + String(currentPhase) + ",";
     json += "\"minutes\":" + String(minutes) + ",";
     json += "\"seconds\":" + String(seconds) + ",";
-    json += "\"completed\":" + String(completedSessions);
+    json += "\"completed\":" + String(completedPomodoroSessions);
     json += "}";
 
     // Send POST request
@@ -580,3 +712,4 @@ void printMacAddress(byte mac[]) {
   }
   Serial.println();
 }
+//==============================================================================
