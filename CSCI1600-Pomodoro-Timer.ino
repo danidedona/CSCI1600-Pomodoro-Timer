@@ -89,7 +89,7 @@ volatile bool startButtonPressed = false;
 volatile bool resetButtonPressed = false;
 
 // === Misc. Variables ===
-bool fastTesting = true;
+bool fastTesting = false;
 bool running = false;
 bool isPaused = false;
 int minutes = 25;
@@ -110,7 +110,7 @@ void setup() {
   tft.begin();
   tft.setRotation(0);
 
-  // wi-fi setup taken from the ConnectWithWPA wifis3 examples ketch
+  // wi-fi setup taken from the ConnectWithWPA wifis3 example sketch
   // check for the WiFi module:
   if (WiFi.status() == WL_NO_MODULE) {
     Serial.println("Communication with WiFi module failed!");
@@ -123,23 +123,29 @@ void setup() {
     Serial.println("Please upgrade the firmware");
   }
 
-  // attempt to connect to WiFi network:
-  while (status != WL_CONNECTED) {
+  // make 3 attempts to connect to wi-fi, to avoid being stuck in an infinite loop
+  int attempts = 0;
+  while (status != WL_CONNECTED && attempts < 3) {
     Serial.print("Attempting to connect to WPA SSID: ");
     Serial.println(ssid);
     // Connect to WPA/WPA2 network:
     status = WiFi.begin(ssid, pass);
 
+    attempts++;
+
     // wait 10 seconds for connection:
     delay(10000);
   }
 
-  // you're connected now, so print out the data:
-  Serial.print("You're connected to the network");
-  printCurrentNet();
-  printWifiData();
-  // start up server connection
-  ensureConnected();
+  // if connected, start server connection
+  if (status == WL_CONNECTED) {
+      Serial.println("You're connected to the network!");
+      ensureConnected();
+  // if connection fails 3 times, run pomodoro timer without wi-fi, just won't save focus data to server
+  } else {
+      Serial.println("ERROR: Could not connect to WiFi after 30 seconds.");
+      Serial.println("Continuing WITHOUT network features.");
+  }
 
   pinMode(START_BUTTON_PIN, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(START_BUTTON_PIN), startButtonISR, FALLING);
@@ -152,6 +158,8 @@ void setup() {
   pinMode(LED_BLUE, OUTPUT);
   pinMode(BUZZER_PIN, OUTPUT);
   drawHomeScreen();
+
+  getDurationConfig();
 }
 
 void loop() {
@@ -212,12 +220,6 @@ void timerLogic() {
     seconds = (remaining % 60000) / 1000;
 
     updateTimerDisplay();
-
-    // Wifi update every 5 seconds
-    if (millis() - lastWifiSend > 5000) {
-        sendPomodoroStatus();
-        lastWifiSend = millis();
-    }
 }
 //==============================================================================
 
@@ -403,13 +405,19 @@ void drawCenteredText(Adafruit_ILI9341 &tft, const char *text, int y) {
   tft.print(text);
 }
 
-void drawButtons() {
+void drawButtons(bool isPaused) {
   tft.fillRect(30, 250, 80, 50, btnPause);
   tft.fillRect(130, 250, 80, 50, btnReset);
 
   tft.setTextColor(ILI9341_WHITE);
   tft.setTextSize(2);
-  tft.setCursor(40, 270); tft.print("PAUSE");
+  if (!isPaused) {
+      tft.setCursor(40, 270);
+      tft.print("PAUSE");
+  } else {
+      tft.setCursor(35, 270);
+      tft.print("RESUME");
+  }
   tft.setCursor(140, 270); tft.print("RESET");
 }
 
@@ -469,12 +477,6 @@ void drawActiveScreen() {
 
 void changeVisual(Phase phase, bool paused) {
 
-      bool wasConnected = client.connected();
-    if (wasConnected) {
-        client.stop();     // close TCP so SPI doesn't corrupt WiFi chip
-        delay(5);          // brief settle time
-    }
-
     // IDLE (Home Screen)
     if (phase == IDLE) {
         drawHomeScreen();
@@ -482,11 +484,6 @@ void changeVisual(Phase phase, bool paused) {
         running = false;
         isPaused = false;
 
-
-        // restore TCP if it was open before the redraw
-        if (wasConnected){
-            ensureConnected();
-        }
         return;
     }
 
@@ -535,11 +532,7 @@ void changeVisual(Phase phase, bool paused) {
 
     // Timer + Buttons (only non-IDLE)
     updateTimerDisplay();
-    drawButtons();
-
-    if (wasConnected) {
-        ensureConnected(); // safely restore persistent TCP connection
-    }
+    drawButtons(isPaused);
 }
 //==============================================================================
 
@@ -558,18 +551,17 @@ void changePhase() {
     }
     else if (currentPhase == FOCUS) {
         completedPomodoroSessions++;
+        sendFocusCompleted();
         next = (completedPomodoroSessions < 4) ? SHORT_BREAK : LONG_BREAK;
     }
     else if (currentPhase == SHORT_BREAK) {
+        sendBreakCompleted(false);
         next = FOCUS;
     }
     else if (currentPhase == LONG_BREAK) {
+        sendBreakCompleted(true);
         completedPomodoroSessions = 0; // reset cycle
         next = FOCUS;
-    }
-
-    if (prev == FOCUS && next != FOCUS) {
-        sendPomodoroStatus();
     }
 
     currentPhase = next;
@@ -652,97 +644,140 @@ void checkWatchdog() {
 //------------------------------------------------------------------------------
 
 bool ensureConnected() {
-    // If still connected, all good
+    // if still connected, just return immediately
     if (client.connected()) {
         return true;
     }
 
-    Serial.println("TCP disconnected — attempting reconnect...");
+    // otherwise it has disconnected
+    Serial.println("Server disconnected, attempting reconnect.");
 
     // Try reconnecting once
     if (client.connect("192.168.1.236", 3000)) {
-        Serial.println("TCP reconnected.");
+        Serial.println("Server reconnected.");
         return true;
     }
 
-    // If reconnect fails → restart entire system
-    Serial.println("TCP reconnect FAILED. REBOOTING SYSTEM.");
+    // if reconnect fails, restart entire system
+    Serial.println("Server failed to reconnect. Restarting System.");
     NVIC_SystemReset();     // full microcontroller reset
-    return false;           // never reached
+    return false;
 }
 
-void sendPomodoroStatus() {
-    // ensure connection is alive — may restart the system
+// customize post request for focus session
+void sendFocusCompleted() {
+    Serial.print("sendFocusCompleted called");
+
+    unsigned long duration = fastTesting ? 10000 : FOCUS_DURATION_MS;
+    // boolean to specify if the current focus session marks the completion of a full pomo cycle (for insights tracking)
+    bool cycleDone = (completedPomodoroSessions == 4);
+
+    sendSession("focus", duration, cycleDone);
+}
+
+// customize post requent for break session
+void sendBreakCompleted(bool longBreak) {
+      Serial.print("sendBreakCompleted called");
+
+      unsigned long duration = fastTesting ?
+        (longBreak ? 8000 : 5000) :
+        (longBreak ? LONG_BREAK_MS : SHORT_BREAK_MS);
+
+    sendSession("break", duration, false);
+}
+
+// send focus and break session data using one call
+void sendSession(const String& type, unsigned long duration, bool isCycleComplete) {
     if (!ensureConnected()) return;
 
-    // Build JSON
     String json = "{";
-    json += "\"state\":" + String(currentPhase) + ",";
-    json += "\"minutes\":" + String(minutes) + ",";
-    json += "\"seconds\":" + String(seconds) + ",";
-    json += "\"completed\":" + String(completedPomodoroSessions);
+    json += "\"type\":\"" + type + "\",";
+    json += "\"duration_ms\":" + String(duration) + ",";
+    json += "\"is_cycle_complete\":" + String(isCycleComplete ? 1 : 0);
     json += "}";
 
-    // Send POST without closing connection
-    client.println("POST /update HTTP/1.1");
+    client.println("POST /session HTTP/1.1");
     client.println("Host: 192.168.1.236");
     client.println("Content-Type: application/json");
     client.print("Content-Length: ");
     client.println(json.length());
     client.println();
     client.print(json);
+    client.print("\r\n\r\n");  // end request
 
-    // IMPORTANT: DO NOT call client.stop()
-}
-
-// === Wi-Fi Helpers ===
-void printWifiData() {
-  // print your board's IP address:
-  IPAddress ip = WiFi.localIP();
-  Serial.print("IP Address: ");
-  
-  Serial.println(ip);
-
-  // print your MAC address:
-  byte mac[6];
-  WiFi.macAddress(mac);
-  Serial.print("MAC address: ");
-  printMacAddress(mac);
-}
-
-void printCurrentNet() {
-  // print the SSID of the network you're attached to:
-  Serial.print("SSID: ");
-  Serial.println(WiFi.SSID());
-
-  // print the MAC address of the router you're attached to:
-  byte bssid[6];
-  WiFi.BSSID(bssid);
-  Serial.print("BSSID: ");
-  printMacAddress(bssid);
-
-  // print the received signal strength:
-  long rssi = WiFi.RSSI();
-  Serial.print("signal strength (RSSI):");
-  Serial.println(rssi);
-
-  // print the encryption type:
-  byte encryption = WiFi.encryptionType();
-  Serial.print("Encryption Type:");
-  Serial.println(encryption, HEX);
-  Serial.println();
-}
-
-void printMacAddress(byte mac[]) {
-  for (int i = 0; i < 6; i++) {
-    if (i > 0) {
-      Serial.print(":");
+    // clear server response
+    unsigned long t = millis();
+    while (millis() - t < 300) {
+        while (client.available()) client.read();
     }
-    if (mac[i] < 16) {
-      Serial.print("0");
-    }
-    Serial.print(mac[i], HEX);
-  }
-  Serial.println();
+
+    client.stop();
+    ensureConnected();
 }
+
+// fetch current config from the backend
+void getDurationConfig() {
+    if (!ensureConnected()) return;
+
+    client.println("GET /config HTTP/1.1");
+    client.println("Host: 192.168.1.236");
+    client.println("Connection: close");
+    client.println();
+
+    String response = "";
+    unsigned long t = millis();
+
+    // read server response
+    while (millis() - t < 1000) {
+        while (client.available()) {
+            char c = client.read();
+            response += c;
+        }
+    }
+
+    client.stop();
+
+    // print the full response
+    Serial.println("Raw response:");
+    Serial.println(response);
+
+    // extract json
+    int jsonStart = response.indexOf('{');
+    int jsonEnd   = response.lastIndexOf('}');
+
+    String json = response.substring(jsonStart, jsonEnd + 1);
+    Serial.println("Extracted JSON:");
+    Serial.println(json);
+
+    // parse json values
+    long focusMs       = getJsonValue(json, "focus_ms");
+    long shortBreakMs  = getJsonValue(json, "short_break_ms");
+    long longBreakMs   = getJsonValue(json, "long_break_ms");
+
+    // update session duration variables
+    FOCUS_DURATION_MS = focusMs;
+    SHORT_BREAK_MS = shortBreakMs;
+    LONG_BREAK_MS = longBreakMs;
+
+    Serial.println("Updated durations:");
+    Serial.println(FOCUS_DURATION_MS);
+    Serial.println(SHORT_BREAK_MS);
+    Serial.println(LONG_BREAK_MS);
+}
+
+long getJsonValue(String json, const char* key) {
+    int idx = json.indexOf(key);
+    if (idx == -1) return -1;
+
+    int colon = json.indexOf(':', idx);
+    int comma = json.indexOf(',', colon);
+    int endBrace = json.indexOf('}', colon);
+
+    int end = (comma == -1) ? endBrace : comma;
+
+    String valueStr = json.substring(colon + 1, end);
+    valueStr.trim();
+    return valueStr.toInt();
+}
+
 //==============================================================================
