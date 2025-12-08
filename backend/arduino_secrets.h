@@ -1,2 +1,0 @@
-#define SECRET_SSID "Verizon_DBZ4FV"
-#define SECRET_PASS "117Hope1MADS"
