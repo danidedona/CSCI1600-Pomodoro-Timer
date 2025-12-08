@@ -1,73 +1,240 @@
-# React + TypeScript + Vite
+# 🌐 Pomodoro Timer Web Dashboard
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A React + TypeScript frontend for visualizing Pomodoro productivity data, customizing timer settings, and providing an informational overview of the project.
+This dashboard interfaces with the backend server at `http://localhost:3000` and displays insights collected from the Arduino Pomodoro Timer device.
 
-Currently, two official plugins are available:
+---
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## 🚀 Overview
 
-## React Compiler
+The frontend provides a clean, responsive dashboard with:
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+### ✔️ **Productivity Insights**
 
-## Expanding the ESLint configuration
+Displays:
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+- Past 7 days of focus time (bar chart)
+- Lifetime focus & break statistics
+- Today's focus & break minutes
+- Completed Pomodoro cycles
+- Average daily focus time
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+### ✔️ **Settings Panel**
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+Allows users to:
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+- Update focus, short break, and long break durations
+- Send configuration changes to the backend (`/update-config`)
+
+### ✔️ **About Page**
+
+Explains:
+
+- Pomodoro technique
+- Device purpose and audience
+- Project background
+
+### ✔️ **Navigation**
+
+Uses React Router for:
+
+- `/` → Insights
+- `/settings`
+- `/about`
+
+---
+
+## 📁 File Structure
+
+```
+frontend/
+│
+├── index.html
+├── src/
+│   ├── main.tsx
+│   ├── App.tsx
+│   ├── components/
+│   │   ├── Insights.tsx
+│   │   ├── Settings.tsx
+│   │   ├── About.tsx
+│   │   ├── BarChart.tsx
+│   ├── styles/
+│   │   ├── insights.css
+│   │   ├── settings.css
+│   │   ├── about.css
+│   └── assets/
+│       └── tomato.png
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+---
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+## 🧩 Key Files & Responsibilities
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+### **index.html**
+
+- Bootstraps the React app
+- Injects `<div id="root">`
+- Loads frontend font + favicon
+
+---
+
+### **main.tsx**
+
+- Mounts the React application
+- Wraps the app in `BrowserRouter`
+- Enables routing
+
+---
+
+### **App.tsx**
+
+Defines the entire navigation structure:
+
+- Global header + nav bar
+- Routes:
+
+  - `/` or `/insights` → `Insights`
+  - `/settings` → `Settings`
+  - `/about` → `About`
+
+Includes the project logo (`tomato.png`).
+
+---
+
+### **Insights.tsx**
+
+Fetches data from:
+
 ```
+GET http://localhost:3000/insights
+```
+
+Displays:
+
+- Total focus & break minutes
+- Total lifetime sessions
+- Today's stats
+- Average minutes focused over the last 7 days
+- Completed Pomodoro cycles
+- **Bar chart visualization** of last 7 days of focus minutes
+
+Uses the `BarChart` component.
+
+---
+
+### **BarChart.tsx**
+
+A wrapper around `react-chartjs-2` + `Chart.js`.
+
+Features:
+
+- Custom font + styling
+- No legend
+- Clean gridlines
+- Pink focus bars (`#ff4c51`)
+
+Accepts:
+
+```ts
+labels: string[]
+values: number[]
+```
+
+---
+
+### **Settings.tsx**
+
+Provides a UI for editing durations:
+
+- Focus duration
+- Short break duration
+- Long break duration
+
+UI elements are rendered, and can be wired to:
+
+```
+POST /update-config
+```
+
+---
+
+### **About.tsx**
+
+Static information page describing:
+
+- What the Pomodoro device does
+- Why the technique is useful
+- Intended audience
+- Team members
+
+---
+
+## ⚙️ Backend Communication
+
+The frontend **expects** a backend running at:
+
+```
+http://localhost:3000
+```
+
+Endpoints used:
+
+### ✔️ `GET /insights`
+
+Displays aggregated productivity stats.
+
+### ✔️ (Planned) `POST /update-config`
+
+Will update session durations based on user input.
+
+### ✔️ `GET /config`
+
+(Optional) Can be used to pre-fill the settings form.
+
+---
+
+## ▶️ Running the Frontend
+
+### 1. Install dependencies
+
+```bash
+npm install
+```
+
+### 2. Start the dev server
+
+```bash
+npm run dev
+```
+
+The app will be available at:
+
+```
+http://localhost:5173
+```
+
+### 3. Ensure backend is running
+
+In a separate terminal:
+
+```bash
+npm start
+```
+
+This must be active for Insights and Settings to function.
+
+---
+
+## 🎨 Styling & Design Notes
+
+- Pages use section-specific stylesheet files
+- Custom typography loaded via Adobe Typekit (`CoFo Sans Pixel`)
+- Layout uses a “bento grid” on the insights page
+- Color palette matches the embedded device aesthetic (soft reds, pinks, and neutrals)
+
+---
+
+## 📄 License
+
+Created for **CSCI 1600 – Real-Time & Embedded Systems**.
+Designed to complement the physical Arduino Pomodoro Timer.
