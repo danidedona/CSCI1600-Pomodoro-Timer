@@ -1,0 +1,50 @@
+:root {
+  font-family: "CoFo Sans Pixel", Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.25;
+  font-weight: 400;
+  font-size: 24px;
+
+  color: black;
+  background-color: white;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  width: 100vw;
+  height: 100vh;
+  margin: 0;
+  padding: 0;
+}
+
+a,
+a:visited {
+  font-weight: 500;
+  color: black;
+  text-decoration: inherit;
+}
+
+a:hover {
+  color: #ff4c51;
+}
+
+h1 {
+  font-size: 48px;
+  line-height: 1;
+  margin: 0;
+  padding: 0;
+}
+
+p {
+  margin: 0;
+  padding: 0;
+}

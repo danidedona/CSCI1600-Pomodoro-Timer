@@ -1,0 +1,17 @@
+main.about {
+  width: 100%;
+  margin-top: 81.5px;
+  padding: 48px 96px;
+
+  display: flex;
+  flex-flow: column nowrap;
+  align-items: start;
+}
+
+main.about > p {
+  padding-top: 24px;
+}
+
+main.about > p.names {
+  color: #ff4c51;
+}
