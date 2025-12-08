@@ -87,6 +87,7 @@ int songLen;
 // === Interrupt Variables ===
 volatile bool startButtonPressed = false;
 volatile bool resetButtonPressed = false;
+bool shouldFetchConfig = false;
 
 // === Misc. Variables ===
 bool fastTesting = false;
@@ -170,6 +171,11 @@ void loop() {
         Serial.println("ISR: Reset button interrupt fired!");
     }
 
+    if (shouldFetchConfig) {
+        shouldFetchConfig = false;
+        getDurationConfig();
+    }
+
   handleButtons();
   handleTouch();
 
@@ -240,6 +246,7 @@ void handleButtons() {
     }
     if (resetButtonPressed) {
         resetEvent = true;
+        shouldFetchConfig = true;
         resetButtonPressed = false;
     }
     interrupts();
