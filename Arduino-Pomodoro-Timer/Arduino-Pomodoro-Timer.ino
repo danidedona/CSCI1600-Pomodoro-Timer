@@ -6,6 +6,9 @@
 #include <WiFiS3.h>
 #include "arduino_secrets.h"
 #include <Fonts/FreeMonoBold9pt7b.h>
+#include "pomodoro-utils.h"
+
+#define TEST_MODE
 
 // === TFT Display Pins ===
 #define TFT_CS 10
@@ -52,12 +55,7 @@ uint32_t FOCUS_DURATION_MS = 25UL * 60UL * 1000UL;
 uint32_t SHORT_BREAK_MS = 5UL  * 60UL * 1000UL;  
 uint32_t LONG_BREAK_MS = 15UL * 60UL * 1000UL;
 
-enum Phase {
-    IDLE,
-    FOCUS,
-    SHORT_BREAK,
-    LONG_BREAK
-};
+
 uint8_t completedPomodoroSessions = 0; // counts completed FOCUS phases (0–3 then long break)
 Phase currentPhase = IDLE;
 uint32_t phaseStartTime = 0; // Timestamp when this phase started
@@ -112,42 +110,42 @@ void setup() {
   tft.begin();
   tft.setRotation(0);
 
-  // wi-fi setup taken from the ConnectWithWPA wifis3 example sketch
-  // check for the WiFi module:
-  if (WiFi.status() == WL_NO_MODULE) {
-    Serial.println("Communication with WiFi module failed!");
-    // don't continue
-    while (true);
-  }
+//   // wi-fi setup taken from the ConnectWithWPA wifis3 example sketch
+//   // check for the WiFi module:
+//   if (WiFi.status() == WL_NO_MODULE) {
+//     Serial.println("Communication with WiFi module failed!");
+//     // don't continue
+//     while (true);
+//   }
 
-  String fv = WiFi.firmwareVersion();
-  if (fv < WIFI_FIRMWARE_LATEST_VERSION) {
-    Serial.println("Please upgrade the firmware");
-  }
+//   String fv = WiFi.firmwareVersion();
+//   if (fv < WIFI_FIRMWARE_LATEST_VERSION) {
+//     Serial.println("Please upgrade the firmware");
+//   }
 
-  // make 3 attempts to connect to wi-fi, to avoid being stuck in an infinite loop
-  int attempts = 0;
-  while (status != WL_CONNECTED && attempts < 3) {
-    Serial.print("Attempting to connect to WPA SSID: ");
-    Serial.println(ssid);
-    // Connect to WPA/WPA2 network:
-    status = WiFi.begin(ssid, pass);
+//   // make 3 attempts to connect to wi-fi, to avoid being stuck in an infinite loop
+//   int attempts = 0;
+//   while (status != WL_CONNECTED && attempts < 3) {
+//     Serial.print("Attempting to connect to WPA SSID: ");
+//     Serial.println(ssid);
+//     // Connect to WPA/WPA2 network:
+//     status = WiFi.begin(ssid, pass);
 
-    attempts++;
+//     attempts++;
 
-    // wait 10 seconds for connection:
-    delay(10000);
-  }
+//     // wait 10 seconds for connection:
+//     delay(10000);
+//   }
 
-  // if connected, start server connection
-  if (status == WL_CONNECTED) {
-      Serial.println("You're connected to the network!");
-      ensureConnected();
-  // if connection fails 3 times, run pomodoro timer without wi-fi, just won't save focus data to server
-  } else {
-      Serial.println("ERROR: Could not connect to WiFi after 30 seconds.");
-      Serial.println("Continuing WITHOUT network features.");
-  }
+//   // if connected, start server connection
+//   if (status == WL_CONNECTED) {
+//       Serial.println("You're connected to the network!");
+//       ensureConnected();
+//   // if connection fails 3 times, run pomodoro timer without wi-fi, just won't save focus data to server
+//   } else {
+//       Serial.println("ERROR: Could not connect to WiFi after 30 seconds.");
+//       Serial.println("Continuing WITHOUT network features.");
+//   }
 
   pinMode(START_BUTTON_PIN, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(START_BUTTON_PIN), startButtonISR, FALLING);
@@ -161,7 +159,7 @@ void setup() {
   pinMode(BUZZER_PIN, OUTPUT);
   drawHomeScreen();
 
-  getDurationConfig();
+//   getDurationConfig(); // comment out to use without wifi
 }
 
 void loop() {
@@ -174,7 +172,7 @@ void loop() {
 
     if (shouldFetchConfig) {
         shouldFetchConfig = false;
-        getDurationConfig();
+        // getDurationConfig(); // comment out to use without wifi
     }
 
   handleButtons();
@@ -189,6 +187,235 @@ void loop() {
 }
 #endif
 //==============================================================================
+
+
+//==============================================================================
+// UI / OTHER VISUALS
+//------------------------------------------------------------------------------
+#ifndef TEST_MODE
+void drawCenteredText(Adafruit_ILI9341 &tft, const char *text, int y) {
+  int16_t x1, y1;
+  uint16_t w, h;
+
+  // Compute the bounding box of the text using current text size & font
+  tft.getTextBounds(text, 0, y, &x1, &y1, &w, &h);
+
+  // center X = (screen_width - text_width) / 2
+  int x = (tft.width() - w) / 2;
+
+  // Draw the centered text
+  tft.setCursor(x, y);
+  tft.print(text);
+}
+#else
+// Test stub
+void drawCenteredTest(Adafruit_ILI9341 &tft, const char *text, int y) {
+  Serial.println("drawCenteredText() called");
+}
+#endif
+
+#ifndef TEST_MODE
+void drawButtons(bool isPaused) {
+  tft.fillRect(30, 250, 80, 50, btnPause);
+  tft.fillRect(130, 250, 80, 50, btnReset);
+
+  tft.setTextColor(ILI9341_WHITE);
+  tft.setTextSize(2);
+  if (!isPaused) {
+      tft.setCursor(40, 270);
+      tft.print("PAUSE");
+  } else {
+      tft.setCursor(35, 270);
+      tft.print("RESUME");
+  }
+  tft.setCursor(140, 270); tft.print("RESET");
+}
+#else
+// Test stub
+void drawButtons(bool isPaused) {
+  Serial.print("drawButtons() called");
+  if (!isPaused) {
+      Serial.println("PAUSE");
+  } else {
+      Serial.println("RESUME");
+  }
+}
+#endif
+
+#ifndef TEST_MODE
+void updateTimerDisplay() {
+  char timeStr[6];
+  sprintf(timeStr, "%02d:%02d", minutes, seconds);
+  tft.fillRect(31, 121, 178, 48, bgColor);
+  tft.setCursor(77, 135);
+  tft.setTextColor(boxOutline);
+  tft.setTextSize(3);
+  tft.print(timeStr);
+}
+#else
+// Test stub
+void updateTimerDisplay() {
+  Serial.println("updateTimerDisplay() called");
+}
+#endif
+
+#ifndef TEST_MODE
+void updateDisplayText(const char* text) {
+  tft.fillRect(30, 180, 180, 50, bgColor);
+  tft.setTextColor(ILI9341_WHITE);
+  tft.setTextSize(2);
+  tft.setCursor(42, 190);
+  drawCenteredText(tft, text, 190);
+}
+#else
+// Test stub
+void updateDisplayText(const char* text) {
+  Serial.println("updateDisplayText() called");
+}
+#endif
+
+
+#ifndef TEST_MODE
+void setLEDColor(int r, int g, int b) {
+  analogWrite(LED_RED, r);
+  analogWrite(LED_GREEN, g);
+  analogWrite(LED_BLUE, b);
+}
+#else
+// Test stub
+void setLEDColor(int r, int g, int b) {
+  Serial.print("setLEDColor called: ");
+  Serial.print(r); Serial.print(",");
+  Serial.print(g); Serial.print(",");
+  Serial.println(b);
+}
+#endif
+
+#ifndef TEST_MODE
+void drawHomeScreen() {
+  tft.fillScreen(bgColor);
+  setLEDColor(255, 255, 255);
+  running = false;
+  isPaused = false;
+
+  tft.setTextColor(ILI9341_WHITE);
+  tft.setTextSize(2);
+  tft.setCursor(40, 60);
+  drawCenteredText(tft, "Pomodoro Timer", 60);
+
+  //Start button
+  tft.fillRect(60, 210, 120, 60, btnStart);
+
+  tft.setTextColor(ILI9341_WHITE);
+  tft.setTextSize(3);
+  tft.setCursor(75, 230);
+  tft.print("START");
+}
+#else
+// Test stub
+void drawHomeScreen() {
+  Serial.println("drawHomeScreen() called");
+}
+#endif
+
+#ifndef TEST_MODE
+void drawActiveScreen() {
+  tft.fillScreen(bgColor);
+  tft.setTextColor(ILI9341_WHITE);
+  tft.setTextSize(2);
+  tft.setCursor(40, 80);
+  tft.print("Pomodoro Timer");
+  tft.drawRect(30, 120, 180, 50, ILI9341_WHITE);
+  updateTimerDisplay();
+}
+#else
+// Test stub
+void drawActiveScreen() {
+  Serial.println("setLEDColor called: ");
+}
+#endif
+
+#ifndef TEST_MODE
+void changeVisual(Phase phase, bool paused) {
+
+    // IDLE (Home Screen)
+    if (phase == IDLE) {
+        drawHomeScreen();
+        setLEDColor(255, 255, 255);
+        running = false;
+        isPaused = false;
+
+        return;
+    }
+
+    // Non-IDLE phases redraw UI frame
+    drawActiveScreen();
+
+    // Phase-specific UI
+    switch (phase) {
+
+        case FOCUS:
+            if (paused) {
+                updateDisplayText("Paused - Focus");
+                setLEDColor(255, 255, 255);
+                running = false;
+            } else {
+                updateDisplayText("Focus Session");
+                setLEDColor(255, 0, 0);
+                running = true;
+            }
+            break;
+
+        case SHORT_BREAK:
+            if (paused) {
+                updateDisplayText("Paused - Short Break");
+                setLEDColor(255, 255, 255);
+                running = false;
+            } else {
+                updateDisplayText("Short Break");
+                setLEDColor(0, 255, 0);
+                running = true;
+            }
+            break;
+
+        case LONG_BREAK:
+            if (paused) {
+                updateDisplayText("Paused - Long Break");
+                setLEDColor(255, 255, 255);
+                running = false;
+            } else {
+                updateDisplayText("Long Break");
+                setLEDColor(0, 0, 255);
+                running = true;
+            }
+            break;
+    }
+
+    // Timer + Buttons (only non-IDLE)
+    updateTimerDisplay();
+    drawButtons(isPaused);
+}
+#else
+// Test stub
+void changeVisual(Phase phase, bool paused) {
+  Serial.println("changeVisual() called");
+
+  if (phase == IDLE) {
+    // Home screen: timer not running
+    running  = false;
+    isPaused = false;
+    return;
+  }
+  else{
+  // For any non-IDLE phase:
+  isPaused = paused;
+  running  = !paused;   // active if not paused
+  }
+}
+#endif
+//==============================================================================
+
+
 
 
 //==============================================================================
@@ -379,6 +606,7 @@ int touchToPixelY(int ty) {
 //==============================================================================
 // BUZZER
 //------------------------------------------------------------------------------
+#ifndef TEST_MODE
 void playRTTTL(const String &song) {
   songLen = rtttlToBuffers(song, noteFrequencies, noteDurations);
   if (songLen == -1) {
@@ -394,158 +622,13 @@ void playRTTTL(const String &song) {
   }
   noTone(BUZZER_PIN);
 }
+#else
+// Test stub
+void playRTTTL(const String &song) {
+  Serial.println("playRTTTL() called");
+}
+#endif
 //==============================================================================
-
-//==============================================================================
-// UI / OTHER VISUALS
-//------------------------------------------------------------------------------
-void drawCenteredText(Adafruit_ILI9341 &tft, const char *text, int y) {
-  int16_t x1, y1;
-  uint16_t w, h;
-
-  // Compute the bounding box of the text using current text size & font
-  tft.getTextBounds(text, 0, y, &x1, &y1, &w, &h);
-
-  // center X = (screen_width - text_width) / 2
-  int x = (tft.width() - w) / 2;
-
-  // Draw the centered text
-  tft.setCursor(x, y);
-  tft.print(text);
-}
-
-void drawButtons(bool isPaused) {
-  tft.fillRect(30, 250, 80, 50, btnPause);
-  tft.fillRect(130, 250, 80, 50, btnReset);
-
-  tft.setTextColor(ILI9341_WHITE);
-  tft.setTextSize(2);
-  if (!isPaused) {
-      tft.setCursor(40, 270);
-      tft.print("PAUSE");
-  } else {
-      tft.setCursor(35, 270);
-      tft.print("RESUME");
-  }
-  tft.setCursor(140, 270); tft.print("RESET");
-}
-
-void updateTimerDisplay() {
-  char timeStr[6];
-  sprintf(timeStr, "%02d:%02d", minutes, seconds);
-  tft.fillRect(31, 121, 178, 48, bgColor);
-  tft.setCursor(77, 135);
-  tft.setTextColor(boxOutline);
-  tft.setTextSize(3);
-  tft.print(timeStr);
-}
-
-void updateDisplayText(const char* text) {
-  tft.fillRect(30, 180, 180, 50, bgColor);
-  tft.setTextColor(ILI9341_WHITE);
-  tft.setTextSize(2);
-  tft.setCursor(42, 190);
-  drawCenteredText(tft, text, 190);
-}
-
-void setLEDColor(int r, int g, int b) {
-  analogWrite(LED_RED, r);
-  analogWrite(LED_GREEN, g);
-  analogWrite(LED_BLUE, b);
-}
-
-void drawHomeScreen() {
-  tft.fillScreen(bgColor);
-  setLEDColor(255, 255, 255);
-  running = false;
-  isPaused = false;
-
-  tft.setTextColor(ILI9341_WHITE);
-  tft.setTextSize(2);
-  tft.setCursor(40, 60);
-  drawCenteredText(tft, "Pomodoro Timer", 60);
-
-  //Start button
-  tft.fillRect(60, 210, 120, 60, btnStart);
-
-  tft.setTextColor(ILI9341_WHITE);
-  tft.setTextSize(3);
-  tft.setCursor(75, 230);
-  tft.print("START");
-}
-
-void drawActiveScreen() {
-  tft.fillScreen(bgColor);
-  tft.setTextColor(ILI9341_WHITE);
-  tft.setTextSize(2);
-  tft.setCursor(40, 80);
-  tft.print("Pomodoro Timer");
-  tft.drawRect(30, 120, 180, 50, ILI9341_WHITE);
-  updateTimerDisplay();
-}
-
-void changeVisual(Phase phase, bool paused) {
-
-    // IDLE (Home Screen)
-    if (phase == IDLE) {
-        drawHomeScreen();
-        setLEDColor(255, 255, 255);
-        running = false;
-        isPaused = false;
-
-        return;
-    }
-
-    // Non-IDLE phases redraw UI frame
-    drawActiveScreen();
-
-    // Phase-specific UI
-    switch (phase) {
-
-        case FOCUS:
-            if (paused) {
-                updateDisplayText("Paused - Focus");
-                setLEDColor(255, 255, 255);
-                running = false;
-            } else {
-                updateDisplayText("Focus Session");
-                setLEDColor(255, 0, 0);
-                running = true;
-            }
-            break;
-
-        case SHORT_BREAK:
-            if (paused) {
-                updateDisplayText("Paused - Short Break");
-                setLEDColor(255, 255, 255);
-                running = false;
-            } else {
-                updateDisplayText("Short Break");
-                setLEDColor(0, 255, 0);
-                running = true;
-            }
-            break;
-
-        case LONG_BREAK:
-            if (paused) {
-                updateDisplayText("Paused - Long Break");
-                setLEDColor(255, 255, 255);
-                running = false;
-            } else {
-                updateDisplayText("Long Break");
-                setLEDColor(0, 0, 255);
-                running = true;
-            }
-            break;
-    }
-
-    // Timer + Buttons (only non-IDLE)
-    updateTimerDisplay();
-    drawButtons(isPaused);
-}
-//==============================================================================
-
-
 
 //==============================================================================
 // PHASE LOGIC
@@ -560,15 +643,15 @@ void changePhase() {
     }
     else if (currentPhase == FOCUS) {
         completedPomodoroSessions++;
-        sendFocusCompleted();
+        // sendFocusCompleted();
         next = (completedPomodoroSessions < 4) ? SHORT_BREAK : LONG_BREAK;
     }
     else if (currentPhase == SHORT_BREAK) {
-        sendBreakCompleted(false);
+        // sendBreakCompleted(false); 
         next = FOCUS;
     }
     else if (currentPhase == LONG_BREAK) {
-        sendBreakCompleted(true);
+        // sendBreakCompleted(true);
         completedPomodoroSessions = 0; // reset cycle
         next = FOCUS;
     }
@@ -649,144 +732,191 @@ void checkWatchdog() {
 
 
 //==============================================================================
-// WIFI / SERVER
+// WIFI / SERVER -> comment out when testing
 //------------------------------------------------------------------------------
 
-bool ensureConnected() {
-    // if still connected, just return immediately
-    if (client.connected()) {
-        return true;
-    }
+// bool ensureConnected() {
+//     // if still connected, just return immediately
+//     if (client.connected()) {
+//         return true;
+//     }
 
-    // otherwise it has disconnected
-    Serial.println("Server disconnected, attempting reconnect.");
+//     // otherwise it has disconnected
+//     Serial.println("Server disconnected, attempting reconnect.");
 
-    // Try reconnecting once
-    if (client.connect("192.168.1.236", 3000)) {
-        Serial.println("Server reconnected.");
-        return true;
-    }
+//     // Try reconnecting once
+//     if (client.connect("192.168.1.236", 3000)) {
+//         Serial.println("Server reconnected.");
+//         return true;
+//     }
 
-    // if reconnect fails, restart entire system
-    Serial.println("Server failed to reconnect. Restarting System.");
-    NVIC_SystemReset();     // full microcontroller reset
-    return false;
-}
+//     // if reconnect fails, restart entire system
+//     Serial.println("Server failed to reconnect. Restarting System.");
+//     NVIC_SystemReset();     // full microcontroller reset
+//     return false;
+// }
 
-// customize post request for focus session
-void sendFocusCompleted() {
-    Serial.print("sendFocusCompleted called");
+// // customize post request for focus session
+// void sendFocusCompleted() {
+//     Serial.print("sendFocusCompleted called");
 
-    unsigned long duration = fastTesting ? 10000 : FOCUS_DURATION_MS;
-    // boolean to specify if the current focus session marks the completion of a full pomo cycle (for insights tracking)
-    bool cycleDone = (completedPomodoroSessions == 4);
+//     unsigned long duration = fastTesting ? 10000 : FOCUS_DURATION_MS;
+//     // boolean to specify if the current focus session marks the completion of a full pomo cycle (for insights tracking)
+//     bool cycleDone = (completedPomodoroSessions == 4);
 
-    sendSession("focus", duration, cycleDone);
-}
+//     sendSession("focus", duration, cycleDone);
+// }
 
-// customize post requent for break session
-void sendBreakCompleted(bool longBreak) {
-      Serial.print("sendBreakCompleted called");
+// // customize post requent for break session
+// void sendBreakCompleted(bool longBreak) {
+//       Serial.print("sendBreakCompleted called");
 
-      unsigned long duration = fastTesting ?
-        (longBreak ? 8000 : 5000) :
-        (longBreak ? LONG_BREAK_MS : SHORT_BREAK_MS);
+//       unsigned long duration = fastTesting ?
+//         (longBreak ? 8000 : 5000) :
+//         (longBreak ? LONG_BREAK_MS : SHORT_BREAK_MS);
 
-    sendSession("break", duration, false);
-}
+//     sendSession("break", duration, false);
+// }
 
-// send focus and break session data using one call
-void sendSession(const String& type, unsigned long duration, bool isCycleComplete) {
-    if (!ensureConnected()) return;
+// // send focus and break session data using one call
+// void sendSession(const String& type, unsigned long duration, bool isCycleComplete) {
+//     if (!ensureConnected()) return;
 
-    String json = "{";
-    json += "\"type\":\"" + type + "\",";
-    json += "\"duration_ms\":" + String(duration) + ",";
-    json += "\"is_cycle_complete\":" + String(isCycleComplete ? 1 : 0);
-    json += "}";
+//     String json = "{";
+//     json += "\"type\":\"" + type + "\",";
+//     json += "\"duration_ms\":" + String(duration) + ",";
+//     json += "\"is_cycle_complete\":" + String(isCycleComplete ? 1 : 0);
+//     json += "}";
 
-    client.println("POST /session HTTP/1.1");
-    client.println("Host: 192.168.1.236");
-    client.println("Content-Type: application/json");
-    client.print("Content-Length: ");
-    client.println(json.length());
-    client.println();
-    client.print(json);
-    client.print("\r\n\r\n");  // end request
+//     client.println("POST /session HTTP/1.1");
+//     client.println("Host: 192.168.1.236");
+//     client.println("Content-Type: application/json");
+//     client.print("Content-Length: ");
+//     client.println(json.length());
+//     client.println();
+//     client.print(json);
+//     client.print("\r\n\r\n");  // end request
 
-    // clear server response
-    unsigned long t = millis();
-    while (millis() - t < 300) {
-        while (client.available()) client.read();
-    }
+//     // clear server response
+//     unsigned long t = millis();
+//     while (millis() - t < 300) {
+//         while (client.available()) client.read();
+//     }
 
-    client.stop();
-    ensureConnected();
-}
+//     client.stop();
+//     ensureConnected();
+// }
 
-// fetch current config from the backend
-void getDurationConfig() {
-    if (!ensureConnected()) return;
+// // fetch current config from the backend
+// void getDurationConfig() {
+//     if (!ensureConnected()) return;
 
-    client.println("GET /config HTTP/1.1");
-    client.println("Host: 192.168.1.236");
-    client.println("Connection: close");
-    client.println();
+//     client.println("GET /config HTTP/1.1");
+//     client.println("Host: 192.168.1.236");
+//     client.println("Connection: close");
+//     client.println();
 
-    String response = "";
-    unsigned long t = millis();
+//     String response = "";
+//     unsigned long t = millis();
 
-    // read server response
-    while (millis() - t < 1000) {
-        while (client.available()) {
-            char c = client.read();
-            response += c;
-        }
-    }
+//     // read server response
+//     while (millis() - t < 1000) {
+//         while (client.available()) {
+//             char c = client.read();
+//             response += c;
+//         }
+//     }
 
-    client.stop();
+//     client.stop();
 
-    // print the full response
-    Serial.println("Raw response:");
-    Serial.println(response);
+//     // print the full response
+//     Serial.println("Raw response:");
+//     Serial.println(response);
 
-    // extract json
-    int jsonStart = response.indexOf('{');
-    int jsonEnd   = response.lastIndexOf('}');
+//     // extract json
+//     int jsonStart = response.indexOf('{');
+//     int jsonEnd   = response.lastIndexOf('}');
 
-    String json = response.substring(jsonStart, jsonEnd + 1);
-    Serial.println("Extracted JSON:");
-    Serial.println(json);
+//     String json = response.substring(jsonStart, jsonEnd + 1);
+//     Serial.println("Extracted JSON:");
+//     Serial.println(json);
 
-    // parse json values
-    long focusMs       = getJsonValue(json, "focus_ms");
-    long shortBreakMs  = getJsonValue(json, "short_break_ms");
-    long longBreakMs   = getJsonValue(json, "long_break_ms");
+//     // parse json values
+//     long focusMs       = getJsonValue(json, "focus_ms");
+//     long shortBreakMs  = getJsonValue(json, "short_break_ms");
+//     long longBreakMs   = getJsonValue(json, "long_break_ms");
 
-    // update session duration variables
-    FOCUS_DURATION_MS = focusMs;
-    SHORT_BREAK_MS = shortBreakMs;
-    LONG_BREAK_MS = longBreakMs;
+//     // update session duration variables
+//     FOCUS_DURATION_MS = focusMs;
+//     SHORT_BREAK_MS = shortBreakMs;
+//     LONG_BREAK_MS = longBreakMs;
 
-    Serial.println("Updated durations:");
-    Serial.println(FOCUS_DURATION_MS);
-    Serial.println(SHORT_BREAK_MS);
-    Serial.println(LONG_BREAK_MS);
-}
+//     Serial.println("Updated durations:");
+//     Serial.println(FOCUS_DURATION_MS);
+//     Serial.println(SHORT_BREAK_MS);
+//     Serial.println(LONG_BREAK_MS);
+// }
 
-long getJsonValue(String json, const char* key) {
-    int idx = json.indexOf(key);
-    if (idx == -1) return -1;
+// long getJsonValue(String json, const char* key) {
+//     int idx = json.indexOf(key);
+//     if (idx == -1) return -1;
 
-    int colon = json.indexOf(':', idx);
-    int comma = json.indexOf(',', colon);
-    int endBrace = json.indexOf('}', colon);
+//     int colon = json.indexOf(':', idx);
+//     int comma = json.indexOf(',', colon);
+//     int endBrace = json.indexOf('}', colon);
 
-    int end = (comma == -1) ? endBrace : comma;
+//     int end = (comma == -1) ? endBrace : comma;
 
-    String valueStr = json.substring(colon + 1, end);
-    valueStr.trim();
-    return valueStr.toInt();
-}
+//     String valueStr = json.substring(colon + 1, end);
+//     valueStr.trim();
+//     return valueStr.toInt();
+// }
 
 //==============================================================================
+
+
+///==============================================================================
+// TESTING FUNCTIONS
+//------------------------------------------------------------------------------
+
+void resetStateForTest() {
+  // Core state
+  currentPhase = IDLE;
+  running = false;
+  isPaused = false;
+  fastTesting = false;
+
+  // Pomodoro tracking
+  completedPomodoroSessions = 0;
+
+  // Timing variables
+  phaseDuration = 0;
+  phaseStartTime = 0;
+  expectedEndTime = 0;
+  lastUpdate = 0;
+  lastButtonPress = 0;
+  remainingAtPause = 0;
+
+  // Watchdog
+  watchdogArmed = false;
+
+  // Button flags
+  noInterrupts();
+  startButtonPressed = false;
+  resetButtonPressed = false;
+  interrupts();
+}
+
+void simulateStartButtonPress() {
+  noInterrupts();
+  startButtonPressed = true;
+  interrupts();
+}
+
+void simulateResetButtonPress() {
+  noInterrupts();
+  resetButtonPressed = true;
+  interrupts();
+}
+//==============================================================================
+
