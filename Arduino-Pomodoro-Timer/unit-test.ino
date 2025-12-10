@@ -3,7 +3,7 @@
 
 
 #include <Arduino.h>
-#define TEST_MODE     // Make sure this is also defined in the main sketch
+// #define TEST_MODE    
 
 #include "pomodoro-utils.h"
 

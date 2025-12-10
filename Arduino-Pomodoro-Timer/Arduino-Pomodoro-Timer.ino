@@ -8,7 +8,7 @@
 #include <Fonts/FreeMonoBold9pt7b.h>
 #include "pomodoro-utils.h"
 
-#define TEST_MODE
+// #define TEST_MODE
 
 // === TFT Display Pins ===
 #define TFT_CS 10
@@ -110,42 +110,42 @@ void setup() {
   tft.begin();
   tft.setRotation(0);
 
-//   // wi-fi setup taken from the ConnectWithWPA wifis3 example sketch
-//   // check for the WiFi module:
-//   if (WiFi.status() == WL_NO_MODULE) {
-//     Serial.println("Communication with WiFi module failed!");
-//     // don't continue
-//     while (true);
-//   }
+  // wi-fi setup taken from the ConnectWithWPA wifis3 example sketch
+  // check for the WiFi module:
+  if (WiFi.status() == WL_NO_MODULE) {
+    Serial.println("Communication with WiFi module failed!");
+    // don't continue
+    while (true);
+  }
 
-//   String fv = WiFi.firmwareVersion();
-//   if (fv < WIFI_FIRMWARE_LATEST_VERSION) {
-//     Serial.println("Please upgrade the firmware");
-//   }
+  String fv = WiFi.firmwareVersion();
+  if (fv < WIFI_FIRMWARE_LATEST_VERSION) {
+    Serial.println("Please upgrade the firmware");
+  }
 
-//   // make 3 attempts to connect to wi-fi, to avoid being stuck in an infinite loop
-//   int attempts = 0;
-//   while (status != WL_CONNECTED && attempts < 3) {
-//     Serial.print("Attempting to connect to WPA SSID: ");
-//     Serial.println(ssid);
-//     // Connect to WPA/WPA2 network:
-//     status = WiFi.begin(ssid, pass);
+  // make 3 attempts to connect to wi-fi, to avoid being stuck in an infinite loop
+  int attempts = 0;
+  while (status != WL_CONNECTED && attempts < 3) {
+    Serial.print("Attempting to connect to WPA SSID: ");
+    Serial.println(ssid);
+    // Connect to WPA/WPA2 network:
+    status = WiFi.begin(ssid, pass);
 
-//     attempts++;
+    attempts++;
 
-//     // wait 10 seconds for connection:
-//     delay(10000);
-//   }
+    // wait 10 seconds for connection:
+    delay(10000);
+  }
 
-//   // if connected, start server connection
-//   if (status == WL_CONNECTED) {
-//       Serial.println("You're connected to the network!");
-//       ensureConnected();
-//   // if connection fails 3 times, run pomodoro timer without wi-fi, just won't save focus data to server
-//   } else {
-//       Serial.println("ERROR: Could not connect to WiFi after 30 seconds.");
-//       Serial.println("Continuing WITHOUT network features.");
-//   }
+  // if connected, start server connection
+  if (status == WL_CONNECTED) {
+      Serial.println("You're connected to the network!");
+      ensureConnected();
+  // if connection fails 3 times, run pomodoro timer without wi-fi, just won't save focus data to server
+  } else {
+      Serial.println("ERROR: Could not connect to WiFi after 30 seconds.");
+      Serial.println("Continuing WITHOUT network features.");
+  }
 
   pinMode(START_BUTTON_PIN, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(START_BUTTON_PIN), startButtonISR, FALLING);
@@ -159,7 +159,7 @@ void setup() {
   pinMode(BUZZER_PIN, OUTPUT);
   drawHomeScreen();
 
-//   getDurationConfig(); // comment out to use without wifi
+  getDurationConfig(); // comment out to use without wifi
 }
 
 void loop() {
@@ -172,7 +172,7 @@ void loop() {
 
     if (shouldFetchConfig) {
         shouldFetchConfig = false;
-        // getDurationConfig(); // comment out to use without wifi
+        getDurationConfig(); // comment out to use without wifi
     }
 
   handleButtons();
@@ -643,15 +643,15 @@ void changePhase() {
     }
     else if (currentPhase == FOCUS) {
         completedPomodoroSessions++;
-        // sendFocusCompleted();
+        sendFocusCompleted(); // comment out to use without wifi
         next = (completedPomodoroSessions < 4) ? SHORT_BREAK : LONG_BREAK;
     }
     else if (currentPhase == SHORT_BREAK) {
-        // sendBreakCompleted(false); 
+        sendBreakCompleted(false); // comment out to use without wifi
         next = FOCUS;
     }
     else if (currentPhase == LONG_BREAK) {
-        // sendBreakCompleted(true);
+        sendBreakCompleted(true); // comment out to use without wifi
         completedPomodoroSessions = 0; // reset cycle
         next = FOCUS;
     }
@@ -735,142 +735,142 @@ void checkWatchdog() {
 // WIFI / SERVER -> comment out when testing
 //------------------------------------------------------------------------------
 
-// bool ensureConnected() {
-//     // if still connected, just return immediately
-//     if (client.connected()) {
-//         return true;
-//     }
+bool ensureConnected() {
+    // if still connected, just return immediately
+    if (client.connected()) {
+        return true;
+    }
 
-//     // otherwise it has disconnected
-//     Serial.println("Server disconnected, attempting reconnect.");
+    // otherwise it has disconnected
+    Serial.println("Server disconnected, attempting reconnect.");
 
-//     // Try reconnecting once
-//     if (client.connect("192.168.1.236", 3000)) {
-//         Serial.println("Server reconnected.");
-//         return true;
-//     }
+    // Try reconnecting once
+    if (client.connect("192.168.1.236", 3000)) {
+        Serial.println("Server reconnected.");
+        return true;
+    }
 
-//     // if reconnect fails, restart entire system
-//     Serial.println("Server failed to reconnect. Restarting System.");
-//     NVIC_SystemReset();     // full microcontroller reset
-//     return false;
-// }
+    // if reconnect fails, restart entire system
+    Serial.println("Server failed to reconnect. Restarting System.");
+    NVIC_SystemReset();     // full microcontroller reset
+    return false;
+}
 
-// // customize post request for focus session
-// void sendFocusCompleted() {
-//     Serial.print("sendFocusCompleted called");
+// customize post request for focus session
+void sendFocusCompleted() {
+    Serial.print("sendFocusCompleted called");
 
-//     unsigned long duration = fastTesting ? 10000 : FOCUS_DURATION_MS;
-//     // boolean to specify if the current focus session marks the completion of a full pomo cycle (for insights tracking)
-//     bool cycleDone = (completedPomodoroSessions == 4);
+    unsigned long duration = fastTesting ? 10000 : FOCUS_DURATION_MS;
+    // boolean to specify if the current focus session marks the completion of a full pomo cycle (for insights tracking)
+    bool cycleDone = (completedPomodoroSessions == 4);
 
-//     sendSession("focus", duration, cycleDone);
-// }
+    sendSession("focus", duration, cycleDone);
+}
 
-// // customize post requent for break session
-// void sendBreakCompleted(bool longBreak) {
-//       Serial.print("sendBreakCompleted called");
+// customize post requent for break session
+void sendBreakCompleted(bool longBreak) {
+      Serial.print("sendBreakCompleted called");
 
-//       unsigned long duration = fastTesting ?
-//         (longBreak ? 8000 : 5000) :
-//         (longBreak ? LONG_BREAK_MS : SHORT_BREAK_MS);
+      unsigned long duration = fastTesting ?
+        (longBreak ? 8000 : 5000) :
+        (longBreak ? LONG_BREAK_MS : SHORT_BREAK_MS);
 
-//     sendSession("break", duration, false);
-// }
+    sendSession("break", duration, false);
+}
 
-// // send focus and break session data using one call
-// void sendSession(const String& type, unsigned long duration, bool isCycleComplete) {
-//     if (!ensureConnected()) return;
+// send focus and break session data using one call
+void sendSession(const String& type, unsigned long duration, bool isCycleComplete) {
+    if (!ensureConnected()) return;
 
-//     String json = "{";
-//     json += "\"type\":\"" + type + "\",";
-//     json += "\"duration_ms\":" + String(duration) + ",";
-//     json += "\"is_cycle_complete\":" + String(isCycleComplete ? 1 : 0);
-//     json += "}";
+    String json = "{";
+    json += "\"type\":\"" + type + "\",";
+    json += "\"duration_ms\":" + String(duration) + ",";
+    json += "\"is_cycle_complete\":" + String(isCycleComplete ? 1 : 0);
+    json += "}";
 
-//     client.println("POST /session HTTP/1.1");
-//     client.println("Host: 192.168.1.236");
-//     client.println("Content-Type: application/json");
-//     client.print("Content-Length: ");
-//     client.println(json.length());
-//     client.println();
-//     client.print(json);
-//     client.print("\r\n\r\n");  // end request
+    client.println("POST /session HTTP/1.1");
+    client.println("Host: 192.168.1.236");
+    client.println("Content-Type: application/json");
+    client.print("Content-Length: ");
+    client.println(json.length());
+    client.println();
+    client.print(json);
+    client.print("\r\n\r\n");  // end request
 
-//     // clear server response
-//     unsigned long t = millis();
-//     while (millis() - t < 300) {
-//         while (client.available()) client.read();
-//     }
+    // clear server response
+    unsigned long t = millis();
+    while (millis() - t < 300) {
+        while (client.available()) client.read();
+    }
 
-//     client.stop();
-//     ensureConnected();
-// }
+    client.stop();
+    ensureConnected();
+}
 
-// // fetch current config from the backend
-// void getDurationConfig() {
-//     if (!ensureConnected()) return;
+// fetch current config from the backend
+void getDurationConfig() {
+    if (!ensureConnected()) return;
 
-//     client.println("GET /config HTTP/1.1");
-//     client.println("Host: 192.168.1.236");
-//     client.println("Connection: close");
-//     client.println();
+    client.println("GET /config HTTP/1.1");
+    client.println("Host: 192.168.1.236");
+    client.println("Connection: close");
+    client.println();
 
-//     String response = "";
-//     unsigned long t = millis();
+    String response = "";
+    unsigned long t = millis();
 
-//     // read server response
-//     while (millis() - t < 1000) {
-//         while (client.available()) {
-//             char c = client.read();
-//             response += c;
-//         }
-//     }
+    // read server response
+    while (millis() - t < 1000) {
+        while (client.available()) {
+            char c = client.read();
+            response += c;
+        }
+    }
 
-//     client.stop();
+    client.stop();
 
-//     // print the full response
-//     Serial.println("Raw response:");
-//     Serial.println(response);
+    // print the full response
+    Serial.println("Raw response:");
+    Serial.println(response);
 
-//     // extract json
-//     int jsonStart = response.indexOf('{');
-//     int jsonEnd   = response.lastIndexOf('}');
+    // extract json
+    int jsonStart = response.indexOf('{');
+    int jsonEnd   = response.lastIndexOf('}');
 
-//     String json = response.substring(jsonStart, jsonEnd + 1);
-//     Serial.println("Extracted JSON:");
-//     Serial.println(json);
+    String json = response.substring(jsonStart, jsonEnd + 1);
+    Serial.println("Extracted JSON:");
+    Serial.println(json);
 
-//     // parse json values
-//     long focusMs       = getJsonValue(json, "focus_ms");
-//     long shortBreakMs  = getJsonValue(json, "short_break_ms");
-//     long longBreakMs   = getJsonValue(json, "long_break_ms");
+    // parse json values
+    long focusMs       = getJsonValue(json, "focus_ms");
+    long shortBreakMs  = getJsonValue(json, "short_break_ms");
+    long longBreakMs   = getJsonValue(json, "long_break_ms");
 
-//     // update session duration variables
-//     FOCUS_DURATION_MS = focusMs;
-//     SHORT_BREAK_MS = shortBreakMs;
-//     LONG_BREAK_MS = longBreakMs;
+    // update session duration variables
+    FOCUS_DURATION_MS = focusMs;
+    SHORT_BREAK_MS = shortBreakMs;
+    LONG_BREAK_MS = longBreakMs;
 
-//     Serial.println("Updated durations:");
-//     Serial.println(FOCUS_DURATION_MS);
-//     Serial.println(SHORT_BREAK_MS);
-//     Serial.println(LONG_BREAK_MS);
-// }
+    Serial.println("Updated durations:");
+    Serial.println(FOCUS_DURATION_MS);
+    Serial.println(SHORT_BREAK_MS);
+    Serial.println(LONG_BREAK_MS);
+}
 
-// long getJsonValue(String json, const char* key) {
-//     int idx = json.indexOf(key);
-//     if (idx == -1) return -1;
+long getJsonValue(String json, const char* key) {
+    int idx = json.indexOf(key);
+    if (idx == -1) return -1;
 
-//     int colon = json.indexOf(':', idx);
-//     int comma = json.indexOf(',', colon);
-//     int endBrace = json.indexOf('}', colon);
+    int colon = json.indexOf(':', idx);
+    int comma = json.indexOf(',', colon);
+    int endBrace = json.indexOf('}', colon);
 
-//     int end = (comma == -1) ? endBrace : comma;
+    int end = (comma == -1) ? endBrace : comma;
 
-//     String valueStr = json.substring(colon + 1, end);
-//     valueStr.trim();
-//     return valueStr.toInt();
-// }
+    String valueStr = json.substring(colon + 1, end);
+    valueStr.trim();
+    return valueStr.toInt();
+}
 
 //==============================================================================
 
