@@ -6,6 +6,9 @@
 #include <WiFiS3.h>
 #include "arduino_secrets.h"
 #include <Fonts/FreeMonoBold9pt7b.h>
+#include "pomodoro-utils.h"
+
+// #define TEST_MODE
 
 // === TFT Display Pins ===
 #define TFT_CS 10
@@ -52,12 +55,7 @@ uint32_t FOCUS_DURATION_MS = 25UL * 60UL * 1000UL;
 uint32_t SHORT_BREAK_MS = 5UL  * 60UL * 1000UL;  
 uint32_t LONG_BREAK_MS = 15UL * 60UL * 1000UL;
 
-enum Phase {
-    IDLE,
-    FOCUS,
-    SHORT_BREAK,
-    LONG_BREAK
-};
+
 uint8_t completedPomodoroSessions = 0; // counts completed FOCUS phases (0–3 then long break)
 Phase currentPhase = IDLE;
 uint32_t phaseStartTime = 0; // Timestamp when this phase started
@@ -87,6 +85,7 @@ int songLen;
 // === Interrupt Variables ===
 volatile bool startButtonPressed = false;
 volatile bool resetButtonPressed = false;
+bool shouldFetchConfig = false;
 
 // === Misc. Variables ===
 bool fastTesting = false;
@@ -105,6 +104,7 @@ unsigned long remainingAtPause = 0;
 //==============================================================================
 // SETUP AND LOOP
 //------------------------------------------------------------------------------
+#ifndef TEST_MODE
 void setup() {
   Serial.begin(9600);
   tft.begin();
@@ -159,7 +159,7 @@ void setup() {
   pinMode(BUZZER_PIN, OUTPUT);
   drawHomeScreen();
 
-  getDurationConfig();
+  getDurationConfig(); // comment out to use without wifi
 }
 
 void loop() {
@@ -168,6 +168,11 @@ void loop() {
     }
     if (resetButtonPressed) {
         Serial.println("ISR: Reset button interrupt fired!");
+    }
+
+    if (shouldFetchConfig) {
+        shouldFetchConfig = false;
+        getDurationConfig(); // comment out to use without wifi
     }
 
   handleButtons();
@@ -180,7 +185,237 @@ void loop() {
     timerLogic();
   }
 }
+#endif
 //==============================================================================
+
+
+//==============================================================================
+// UI / OTHER VISUALS
+//------------------------------------------------------------------------------
+#ifndef TEST_MODE
+void drawCenteredText(Adafruit_ILI9341 &tft, const char *text, int y) {
+  int16_t x1, y1;
+  uint16_t w, h;
+
+  // Compute the bounding box of the text using current text size & font
+  tft.getTextBounds(text, 0, y, &x1, &y1, &w, &h);
+
+  // center X = (screen_width - text_width) / 2
+  int x = (tft.width() - w) / 2;
+
+  // Draw the centered text
+  tft.setCursor(x, y);
+  tft.print(text);
+}
+#else
+// Test stub
+void drawCenteredTest(Adafruit_ILI9341 &tft, const char *text, int y) {
+  Serial.println("drawCenteredText() called");
+}
+#endif
+
+#ifndef TEST_MODE
+void drawButtons(bool isPaused) {
+  tft.fillRect(30, 250, 80, 50, btnPause);
+  tft.fillRect(130, 250, 80, 50, btnReset);
+
+  tft.setTextColor(ILI9341_WHITE);
+  tft.setTextSize(2);
+  if (!isPaused) {
+      tft.setCursor(40, 270);
+      tft.print("PAUSE");
+  } else {
+      tft.setCursor(35, 270);
+      tft.print("RESUME");
+  }
+  tft.setCursor(140, 270); tft.print("RESET");
+}
+#else
+// Test stub
+void drawButtons(bool isPaused) {
+  Serial.print("drawButtons() called");
+  if (!isPaused) {
+      Serial.println("PAUSE");
+  } else {
+      Serial.println("RESUME");
+  }
+}
+#endif
+
+#ifndef TEST_MODE
+void updateTimerDisplay() {
+  char timeStr[6];
+  sprintf(timeStr, "%02d:%02d", minutes, seconds);
+  tft.fillRect(31, 121, 178, 48, bgColor);
+  tft.setCursor(77, 135);
+  tft.setTextColor(boxOutline);
+  tft.setTextSize(3);
+  tft.print(timeStr);
+}
+#else
+// Test stub
+void updateTimerDisplay() {
+  Serial.println("updateTimerDisplay() called");
+}
+#endif
+
+#ifndef TEST_MODE
+void updateDisplayText(const char* text) {
+  tft.fillRect(30, 180, 180, 50, bgColor);
+  tft.setTextColor(ILI9341_WHITE);
+  tft.setTextSize(2);
+  tft.setCursor(42, 190);
+  drawCenteredText(tft, text, 190);
+}
+#else
+// Test stub
+void updateDisplayText(const char* text) {
+  Serial.println("updateDisplayText() called");
+}
+#endif
+
+
+#ifndef TEST_MODE
+void setLEDColor(int r, int g, int b) {
+  analogWrite(LED_RED, r);
+  analogWrite(LED_GREEN, g);
+  analogWrite(LED_BLUE, b);
+}
+#else
+// Test stub
+void setLEDColor(int r, int g, int b) {
+  Serial.print("setLEDColor called: ");
+  Serial.print(r); Serial.print(",");
+  Serial.print(g); Serial.print(",");
+  Serial.println(b);
+}
+#endif
+
+#ifndef TEST_MODE
+void drawHomeScreen() {
+  tft.fillScreen(bgColor);
+  setLEDColor(255, 255, 255);
+  running = false;
+  isPaused = false;
+
+  tft.setTextColor(ILI9341_WHITE);
+  tft.setTextSize(2);
+  tft.setCursor(40, 60);
+  drawCenteredText(tft, "Pomodoro Timer", 60);
+
+  //Start button
+  tft.fillRect(60, 210, 120, 60, btnStart);
+
+  tft.setTextColor(ILI9341_WHITE);
+  tft.setTextSize(3);
+  tft.setCursor(75, 230);
+  tft.print("START");
+}
+#else
+// Test stub
+void drawHomeScreen() {
+  Serial.println("drawHomeScreen() called");
+}
+#endif
+
+#ifndef TEST_MODE
+void drawActiveScreen() {
+  tft.fillScreen(bgColor);
+  tft.setTextColor(ILI9341_WHITE);
+  tft.setTextSize(2);
+  tft.setCursor(40, 80);
+  tft.print("Pomodoro Timer");
+  tft.drawRect(30, 120, 180, 50, ILI9341_WHITE);
+  updateTimerDisplay();
+}
+#else
+// Test stub
+void drawActiveScreen() {
+  Serial.println("setLEDColor called: ");
+}
+#endif
+
+#ifndef TEST_MODE
+void changeVisual(Phase phase, bool paused) {
+
+    // IDLE (Home Screen)
+    if (phase == IDLE) {
+        drawHomeScreen();
+        setLEDColor(255, 255, 255);
+        running = false;
+        isPaused = false;
+
+        return;
+    }
+
+    // Non-IDLE phases redraw UI frame
+    drawActiveScreen();
+
+    // Phase-specific UI
+    switch (phase) {
+
+        case FOCUS:
+            if (paused) {
+                updateDisplayText("Paused - Focus");
+                setLEDColor(255, 255, 255);
+                running = false;
+            } else {
+                updateDisplayText("Focus Session");
+                setLEDColor(255, 0, 0);
+                running = true;
+            }
+            break;
+
+        case SHORT_BREAK:
+            if (paused) {
+                updateDisplayText("Paused - Short Break");
+                setLEDColor(255, 255, 255);
+                running = false;
+            } else {
+                updateDisplayText("Short Break");
+                setLEDColor(0, 255, 0);
+                running = true;
+            }
+            break;
+
+        case LONG_BREAK:
+            if (paused) {
+                updateDisplayText("Paused - Long Break");
+                setLEDColor(255, 255, 255);
+                running = false;
+            } else {
+                updateDisplayText("Long Break");
+                setLEDColor(0, 0, 255);
+                running = true;
+            }
+            break;
+    }
+
+    // Timer + Buttons (only non-IDLE)
+    updateTimerDisplay();
+    drawButtons(isPaused);
+}
+#else
+// Test stub
+void changeVisual(Phase phase, bool paused) {
+  Serial.println("changeVisual() called");
+
+  if (phase == IDLE) {
+    // Home screen: timer not running
+    running  = false;
+    isPaused = false;
+    return;
+  }
+  else{
+  // For any non-IDLE phase:
+  isPaused = paused;
+  running  = !paused;   // active if not paused
+  }
+}
+#endif
+//==============================================================================
+
+
 
 
 //==============================================================================
@@ -240,6 +475,7 @@ void handleButtons() {
     }
     if (resetButtonPressed) {
         resetEvent = true;
+        shouldFetchConfig = true;
         resetButtonPressed = false;
     }
     interrupts();
@@ -370,6 +606,7 @@ int touchToPixelY(int ty) {
 //==============================================================================
 // BUZZER
 //------------------------------------------------------------------------------
+#ifndef TEST_MODE
 void playRTTTL(const String &song) {
   songLen = rtttlToBuffers(song, noteFrequencies, noteDurations);
   if (songLen == -1) {
@@ -385,158 +622,13 @@ void playRTTTL(const String &song) {
   }
   noTone(BUZZER_PIN);
 }
+#else
+// Test stub
+void playRTTTL(const String &song) {
+  Serial.println("playRTTTL() called");
+}
+#endif
 //==============================================================================
-
-//==============================================================================
-// UI / OTHER VISUALS
-//------------------------------------------------------------------------------
-void drawCenteredText(Adafruit_ILI9341 &tft, const char *text, int y) {
-  int16_t x1, y1;
-  uint16_t w, h;
-
-  // Compute the bounding box of the text using current text size & font
-  tft.getTextBounds(text, 0, y, &x1, &y1, &w, &h);
-
-  // center X = (screen_width - text_width) / 2
-  int x = (tft.width() - w) / 2;
-
-  // Draw the centered text
-  tft.setCursor(x, y);
-  tft.print(text);
-}
-
-void drawButtons(bool isPaused) {
-  tft.fillRect(30, 250, 80, 50, btnPause);
-  tft.fillRect(130, 250, 80, 50, btnReset);
-
-  tft.setTextColor(ILI9341_WHITE);
-  tft.setTextSize(2);
-  if (!isPaused) {
-      tft.setCursor(40, 270);
-      tft.print("PAUSE");
-  } else {
-      tft.setCursor(35, 270);
-      tft.print("RESUME");
-  }
-  tft.setCursor(140, 270); tft.print("RESET");
-}
-
-void updateTimerDisplay() {
-  char timeStr[6];
-  sprintf(timeStr, "%02d:%02d", minutes, seconds);
-  tft.fillRect(31, 121, 178, 48, bgColor);
-  tft.setCursor(77, 135);
-  tft.setTextColor(boxOutline);
-  tft.setTextSize(3);
-  tft.print(timeStr);
-}
-
-void updateDisplayText(const char* text) {
-  tft.fillRect(30, 180, 180, 50, bgColor);
-  tft.setTextColor(ILI9341_WHITE);
-  tft.setTextSize(2);
-  tft.setCursor(42, 190);
-  drawCenteredText(tft, text, 190);
-}
-
-void setLEDColor(int r, int g, int b) {
-  analogWrite(LED_RED, r);
-  analogWrite(LED_GREEN, g);
-  analogWrite(LED_BLUE, b);
-}
-
-void drawHomeScreen() {
-  tft.fillScreen(bgColor);
-  setLEDColor(255, 255, 255);
-  running = false;
-  isPaused = false;
-
-  tft.setTextColor(ILI9341_WHITE);
-  tft.setTextSize(2);
-  tft.setCursor(40, 60);
-  drawCenteredText(tft, "Pomodoro Timer", 60);
-
-  //Start button
-  tft.fillRect(60, 210, 120, 60, btnStart);
-
-  tft.setTextColor(ILI9341_WHITE);
-  tft.setTextSize(3);
-  tft.setCursor(75, 230);
-  tft.print("START");
-}
-
-void drawActiveScreen() {
-  tft.fillScreen(bgColor);
-  tft.setTextColor(ILI9341_WHITE);
-  tft.setTextSize(2);
-  tft.setCursor(40, 80);
-  tft.print("Pomodoro Timer");
-  tft.drawRect(30, 120, 180, 50, ILI9341_WHITE);
-  updateTimerDisplay();
-}
-
-void changeVisual(Phase phase, bool paused) {
-
-    // IDLE (Home Screen)
-    if (phase == IDLE) {
-        drawHomeScreen();
-        setLEDColor(255, 255, 255);
-        running = false;
-        isPaused = false;
-
-        return;
-    }
-
-    // Non-IDLE phases redraw UI frame
-    drawActiveScreen();
-
-    // Phase-specific UI
-    switch (phase) {
-
-        case FOCUS:
-            if (paused) {
-                updateDisplayText("Paused - Focus");
-                setLEDColor(255, 255, 255);
-                running = false;
-            } else {
-                updateDisplayText("Focus Session");
-                setLEDColor(255, 0, 0);
-                running = true;
-            }
-            break;
-
-        case SHORT_BREAK:
-            if (paused) {
-                updateDisplayText("Paused - Short Break");
-                setLEDColor(255, 255, 255);
-                running = false;
-            } else {
-                updateDisplayText("Short Break");
-                setLEDColor(0, 255, 0);
-                running = true;
-            }
-            break;
-
-        case LONG_BREAK:
-            if (paused) {
-                updateDisplayText("Paused - Long Break");
-                setLEDColor(255, 255, 255);
-                running = false;
-            } else {
-                updateDisplayText("Long Break");
-                setLEDColor(0, 0, 255);
-                running = true;
-            }
-            break;
-    }
-
-    // Timer + Buttons (only non-IDLE)
-    updateTimerDisplay();
-    drawButtons(isPaused);
-}
-//==============================================================================
-
-
 
 //==============================================================================
 // PHASE LOGIC
@@ -551,15 +643,15 @@ void changePhase() {
     }
     else if (currentPhase == FOCUS) {
         completedPomodoroSessions++;
-        sendFocusCompleted();
+        sendFocusCompleted(); // comment out to use without wifi
         next = (completedPomodoroSessions < 4) ? SHORT_BREAK : LONG_BREAK;
     }
     else if (currentPhase == SHORT_BREAK) {
-        sendBreakCompleted(false);
+        sendBreakCompleted(false); // comment out to use without wifi
         next = FOCUS;
     }
     else if (currentPhase == LONG_BREAK) {
-        sendBreakCompleted(true);
+        sendBreakCompleted(true); // comment out to use without wifi
         completedPomodoroSessions = 0; // reset cycle
         next = FOCUS;
     }
@@ -640,7 +732,7 @@ void checkWatchdog() {
 
 
 //==============================================================================
-// WIFI / SERVER
+// WIFI / SERVER -> comment out when testing
 //------------------------------------------------------------------------------
 
 bool ensureConnected() {
@@ -781,3 +873,50 @@ long getJsonValue(String json, const char* key) {
 }
 
 //==============================================================================
+
+
+///==============================================================================
+// TESTING FUNCTIONS
+//------------------------------------------------------------------------------
+
+void resetStateForTest() {
+  // Core state
+  currentPhase = IDLE;
+  running = false;
+  isPaused = false;
+  fastTesting = false;
+
+  // Pomodoro tracking
+  completedPomodoroSessions = 0;
+
+  // Timing variables
+  phaseDuration = 0;
+  phaseStartTime = 0;
+  expectedEndTime = 0;
+  lastUpdate = 0;
+  lastButtonPress = 0;
+  remainingAtPause = 0;
+
+  // Watchdog
+  watchdogArmed = false;
+
+  // Button flags
+  noInterrupts();
+  startButtonPressed = false;
+  resetButtonPressed = false;
+  interrupts();
+}
+
+void simulateStartButtonPress() {
+  noInterrupts();
+  startButtonPressed = true;
+  interrupts();
+}
+
+void simulateResetButtonPress() {
+  noInterrupts();
+  resetButtonPressed = true;
+  interrupts();
+}
+//==============================================================================
+
