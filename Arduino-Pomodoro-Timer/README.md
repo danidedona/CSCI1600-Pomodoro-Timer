@@ -77,40 +77,24 @@ This is the primary file uploaded to the Arduino.
 ---
 ### **pomodoro-utils.h**
 
-Header that defines key functions and globabl variables. This file is included in both the main file and also test files. 
+Header that defines key functions and global variables. This file is included in both the main file and also test files. 
 
+Contains:
 
-This file separates key functions the Pomodoro uses so they can be tested in isolation.
+- Phase enum (IDLE, FOCUS, SHORT_BREAK, LONG_BREAK)
+- Global state (currentPhase, running, isPaused, completedPomodoroSessions)
+- Functions (initPomodoroCore(), timerLogic(), handleButtons(), changePhase())
+- Testing helpers
 
 ---
 ### **integration-tests.ino**
 
-Main program file. Responsible for:
-
-- Initialization (TFT, touchscreen, WiFi, buttons, LEDs)
-- Pomodoro timer logic
-- Phase transitions and UI updates
-- Interrupt handling
-- Watchdog monitoring
-- WiFi POST/GET to external server
-- Playing buzzer melodies
-
-This is the primary file uploaded to the Arduino.
+Contains a couple integration tests for the full Pomodoro workflow. To run uncomment `#define TEST_MODE` in Arduino-Pomodoro-Timer.ino file and make sure that all wifi related code is commented. 
 
 ---
 ### **unit-tests.ino**
 
-Main program file. Responsible for:
-
-- Initialization (TFT, touchscreen, WiFi, buttons, LEDs)
-- Pomodoro timer logic
-- Phase transitions and UI updates
-- Interrupt handling
-- Watchdog monitoring
-- WiFi POST/GET to external server
-- Playing buzzer melodies
-
-This is the primary file uploaded to the Arduino.
+Contains a unit tests for the the necessary functions for the Pomodoro. To run uncomment `#define TEST_MODE` in Arduino-Pomodoro-Timer.ino file and make sure that all wifi related code is commented. 
 
 ---
 
