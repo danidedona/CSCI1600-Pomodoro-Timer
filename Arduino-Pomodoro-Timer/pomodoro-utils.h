@@ -18,7 +18,7 @@ void timerLogic();
 void handleButtons();
 void changePhase();
 
-// Optionally: helpers for tests
+// helpers for tests
 void resetStateForTest();
 void simulateStartButtonPress();
 void simulateResetButtonPress();

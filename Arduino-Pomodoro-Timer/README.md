@@ -43,6 +43,10 @@ This folder contains **all microcontroller code** that runs the Pomodoro device.
 - Detects timing drift
 - If a phase ends too early/late → **auto system reset**
 
+### ✔️ Testing
+
+- Integration and unit tests that can be run when when in TEST_MODE
+
 ### ✔️ Optional WiFi Logging
 
 If connected to WiFi, the Arduino automatically sends session data to a backend server:
@@ -57,6 +61,44 @@ If WiFi fails, the device continues offline.
 ## 📁 File Overview
 
 ### **Arduino-Pomodoro-Timer.ino**
+
+Main program file. Responsible for:
+
+- Initialization (TFT, touchscreen, WiFi, buttons, LEDs)
+- Pomodoro timer logic
+- Phase transitions and UI updates
+- Interrupt handling
+- Watchdog monitoring
+- WiFi POST/GET to external server
+- Playing buzzer melodies
+
+This is the primary file uploaded to the Arduino.
+
+---
+### **pomodoro-utils.h**
+
+Header that defines key functions and globabl variables. This file is included in both the main file and also test files. 
+
+
+This file separates key functions the Pomodoro uses so they can be tested in isolation.
+
+---
+### **integration-tests.ino**
+
+Main program file. Responsible for:
+
+- Initialization (TFT, touchscreen, WiFi, buttons, LEDs)
+- Pomodoro timer logic
+- Phase transitions and UI updates
+- Interrupt handling
+- Watchdog monitoring
+- WiFi POST/GET to external server
+- Playing buzzer melodies
+
+This is the primary file uploaded to the Arduino.
+
+---
+### **unit-tests.ino**
 
 Main program file. Responsible for:
 

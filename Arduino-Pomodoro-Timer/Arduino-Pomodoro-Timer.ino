@@ -880,7 +880,7 @@ long getJsonValue(String json, const char* key) {
 //------------------------------------------------------------------------------
 
 void resetStateForTest() {
-  // Core state
+  // beginning state
   currentPhase = IDLE;
   running = false;
   isPaused = false;
